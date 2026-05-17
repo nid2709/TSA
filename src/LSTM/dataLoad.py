@@ -1,0 +1,109 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+
+
+PCA_FEATURES = [
+    # PCA uses only clean input features, not target/id/high-missing columns.
+    'ens160_aqi',
+    'ens160_tvoc',
+    'bme688_gas_resistance',
+    'bme688_pressure',
+    'scd41_temperature',
+    'scd41_humidity',
+]
+
+
+def load_prepare_data(csv_path="data/indoorAir2.csv"):
+    df = pd.read_csv(csv_path)
+
+    # --------------------------------------------------
+    # load_prepare_data() -> Raw Dataset Information
+    # --------------------------------------------------
+    print("\n========== RAW DATASET ==========")
+    print("Raw dataset shape:", df.shape)
+
+    print("\nColumns in dataset:")
+    print(df.columns.tolist())
+
+    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
+
+    # Sorting by timestamp is required before time-series splitting/resampling.
+    df = df.sort_values(by='timestamp')
+
+    # The timestamp index allows LSTM.py to create time features and resample by time.
+    df.set_index('timestamp', inplace=True)
+
+    # --------------------------------------------------
+    # load_prepare_data() -> Timestamp Conversion
+    # --------------------------------------------------
+    print("\n========== TIMESTAMP PROCESSING ==========")
+    print("\nDataset shape after timestamp processing:", df.shape)
+
+    print("\nDate range:")
+    print("Start:", df.index.min())
+    print("End:", df.index.max())
+
+    print("\nData loaded and Preparation..!")
+    return df
+
+
+def plot_time_series(df):
+    plt.figure(figsize=(10, 4))
+    plt.plot(df['scd41_co2'])
+    plt.title("CO2 Time Series")
+    plt.show()
+
+
+def plot_heatmap(df):
+    corr = df.select_dtypes(include=['float64', 'int64']).corr()
+    plt.figure(figsize=(12, 8))
+    sns.heatmap(
+        corr,
+        annot=True,
+        cmap='coolwarm',
+        fmt=".2f"
+    )
+
+    plt.title("Correlation Heatmap")
+    plt.show()
+
+def plot_pca_analysis(df):
+    numerical_df = df[PCA_FEATURES].copy()
+
+    # --------------------------------------------------
+    # plot_pca_analysis() -> Handle Missing Values
+    # --------------------------------------------------
+    numerical_df = (
+        numerical_df
+        .interpolate(method='time')
+        .ffill()
+        .bfill()
+        .dropna()
+    )
+
+    scaler = StandardScaler()
+    scaled_data = scaler.fit_transform(numerical_df)
+    pca = PCA()
+    pca.fit(scaled_data)
+    explained_variance = pca.explained_variance_ratio_
+    cumulative_variance = explained_variance.cumsum()
+    print("\n========== PCA ANALYSIS ==========")
+    print("Explained Variance Ratio:")
+    print(explained_variance)
+    print("\nCumulative Variance:")
+    print(cumulative_variance)
+
+    plt.figure(figsize=(8, 4))
+    plt.plot(
+        range(1, len(cumulative_variance) + 1),
+        cumulative_variance,
+        marker='o'
+    )
+    plt.xlabel("Number of Principal Components")
+    plt.ylabel("Cumulative Explained Variance")
+    plt.title("PCA Cumulative Explained Variance")
+    plt.grid(True)
+    plt.show()
