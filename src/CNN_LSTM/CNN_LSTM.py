@@ -53,22 +53,19 @@ def preprocess_data(df):
     print("\n========== PREPROCESSING ==========")
     print("Raw dataset shape:", df.shape)
 
-    station_counts = df[STATION_COLUMN].value_counts()
-
-    useful_stations = station_counts[station_counts >= 100].index
-
-    df = df[df[STATION_COLUMN].isin(useful_stations)]
-
-    print("After station filtering:", df.shape)
+    print(
+        "\nStations available:",
+        sorted(df[STATION_COLUMN].unique().tolist())
+    )
 
     df = add_time_features(df)
 
     df = df[BASE_FEATURES + [STATION_COLUMN]]
 
-    print("Selected features:")
+    print("\nSelected features:")
     print(BASE_FEATURES)
 
-    print("After feature selection:", df.shape)
+    print("\nAfter feature selection:", df.shape)
 
     df = (
         df.groupby(STATION_COLUMN)
@@ -78,57 +75,98 @@ def preprocess_data(df):
         .reset_index(level=0)
     )
 
-    print("After resampling:", df.shape)
+    print("\nAfter resampling:", df.shape)
 
     return df[BASE_FEATURES + [STATION_COLUMN]]
 
 
+# def split_data_by_station(df):
+
+#     train_parts = []
+#     val_parts = []
+#     test_parts = []
+
+#     for station_id, station_df in df.groupby(STATION_COLUMN):
+
+#         station_df = station_df.sort_index()
+
+#         train_end = int(len(station_df) * 0.70)
+#         val_end = int(len(station_df) * 0.85)
+
+#         train_df = station_df.iloc[:train_end]
+#         val_df = station_df.iloc[train_end:val_end]
+#         test_df = station_df.iloc[val_end:]
+
+#         print(f"\nStation {station_id}")
+
+#         print(
+#             f"Train range: "
+#             f"{train_df.index.min()} -> {train_df.index.max()}"
+#         )
+
+#         print(
+#             f"Validation range: "
+#             f"{val_df.index.min()} -> {val_df.index.max()}"
+#         )
+
+#         print(
+#             f"Test range: "
+#             f"{test_df.index.min()} -> {test_df.index.max()}"
+#         )
+
+#         train_parts.append(train_df)
+#         val_parts.append(val_df)
+#         test_parts.append(test_df)
+
+#     return train_parts, val_parts, test_parts
+
+#New with cross-station experiments
 def split_data_by_station(df):
-    train_parts = []
-    val_parts = []
-    test_parts = []
 
-    for station_id, station_df in df.groupby(STATION_COLUMN):
+    train_station = 3
+    val_station = 4
+    test_station = 5
 
-        station_df = station_df.sort_index()
+    train_df = df[
+        df[STATION_COLUMN] == train_station
+    ].sort_index()
 
-        train_end = int(len(station_df) * 0.70)
-        val_end = int(len(station_df) * 0.85)
+    val_df = df[
+        df[STATION_COLUMN] == val_station
+    ].sort_index()
 
-        train_df = station_df.iloc[:train_end]
-        val_df = station_df.iloc[train_end:val_end]
-        test_df = station_df.iloc[val_end:]
+    test_df = df[
+        df[STATION_COLUMN] == test_station
+    ].sort_index()
 
-        print(f"\nStation {station_id}")
+    print("\n========== CROSS-STATION SPLIT ==========")
 
-        print(
-            f"Train range: "
-            f"{train_df.index.min()} -> {train_df.index.max()}"
-        )
+    print(f"\nTraining Station: {train_station}")
+    print("Train shape:", train_df.shape)
 
-        print(
-            f"Validation range: "
-            f"{val_df.index.min()} -> {val_df.index.max()}"
-        )
+    print(f"\nValidation Station: {val_station}")
+    print("Validation shape:", val_df.shape)
 
-        print(
-            f"Test range: "
-            f"{test_df.index.min()} -> {test_df.index.max()}"
-        )
+    print(f"\nTesting Station: {test_station}")
+    print("Test shape:", test_df.shape)
 
-        train_parts.append(train_df)
-        val_parts.append(val_df)
-        test_parts.append(test_df)
+    train_parts = [train_df]
+    val_parts = [val_df]
+    test_parts = [test_df]
 
     return train_parts, val_parts, test_parts
 
-
 def fill_missing_parts(parts):
+
     cleaned_parts = []
 
-    input_features = [col for col in BASE_FEATURES if col != TARGET]
+    input_features = [
+        col for col in BASE_FEATURES
+        if col != TARGET
+    ]
 
     for part in parts:
+
         part = part.copy()
 
         print("\nMissing values before interpolation:")
@@ -154,16 +192,22 @@ def fill_missing_parts(parts):
 
 
 def build_model_parts(parts, station_ids):
-    station_features = [f"station_{sid}" for sid in station_ids]
+
+    station_features = [
+        f"station_{sid}"
+        for sid in station_ids
+    ]
 
     model_features = BASE_FEATURES + station_features
 
     model_parts = []
 
     for part in parts:
+
         part = part.copy()
 
         for sid in station_ids:
+
             part[f"station_{sid}"] = (
                 part[STATION_COLUMN] == sid
             ).astype(int)
@@ -177,36 +221,94 @@ def build_model_parts(parts, station_ids):
 
 
 def scale_data(train_parts, val_parts, test_parts):
+
     scaler = MinMaxScaler()
 
     scaler.fit(np.vstack(train_parts))
 
     print("\nScaler fitted ONLY on training data.")
 
-    train_parts = [scaler.transform(p) for p in train_parts if len(p) > 0]
-    val_parts = [scaler.transform(p) for p in val_parts if len(p) > 0]
-    test_parts = [scaler.transform(p) for p in test_parts if len(p) > 0]
+    train_parts = [
+        scaler.transform(p)
+        for p in train_parts
+        if len(p) > 0
+    ]
+
+    val_parts = [
+        scaler.transform(p)
+        for p in val_parts
+        if len(p) > 0
+    ]
+
+    test_parts = [
+        scaler.transform(p)
+        for p in test_parts
+        if len(p) > 0
+    ]
 
     return train_parts, val_parts, test_parts
 
 
-def create_sequences(data_parts, model_features, seq_length=24):
+def create_sequences(
+    data_parts,
+    model_features,
+    input_seq_length=24,
+    output_seq_length=6
+):
+
     X, y = [], []
 
     target_index = model_features.index(TARGET)
 
     for data in data_parts:
 
-        print("\nOriginal data shape before sequencing:", data.shape)
+        print(
+            "\nOriginal data shape before sequencing:",
+            data.shape
+        )
 
-        if len(data) <= seq_length:
+        required_length = (
+            input_seq_length + output_seq_length
+        )
+
+        if len(data) <= required_length:
+
+            print(
+                "\nSkipping sequence generation:"
+            )
+
+            print(
+                f"Available rows: {len(data)}"
+            )
+
+            print(
+                f"Required minimum rows: "
+                f"{required_length + 1}"
+            )
+
             continue
 
-        for i in range(len(data) - seq_length):
+        for i in range(
+            len(data)
+            - input_seq_length
+            - output_seq_length
+        ):
 
-            X.append(data[i:i + seq_length])
+            # Input sequence
+            X.append(
+                data[
+                    i:i + input_seq_length
+                ]
+            )
 
-            y.append(data[i + seq_length, target_index])
+            # Multi-step target sequence
+            y.append(
+                data[
+                    i + input_seq_length:
+                    i + input_seq_length + output_seq_length,
+                    target_index
+                ]
+            )
 
     X = np.array(X)
     y = np.array(y)
@@ -215,14 +317,26 @@ def create_sequences(data_parts, model_features, seq_length=24):
     print("Sequence target shape:", y.shape)
 
     if len(X) == 0:
+
         raise ValueError(
-            "No CNN-LSTM sequences were created. Use a shorter seq_length or check missing data."
+            "\nNo CNN-LSTM sequences were created.\n"
+            "Possible reasons:\n"
+            "- selected station has too few rows\n"
+            "- too many missing values removed\n"
+            "- input/output sequence lengths are too large\n"
+            "- train/validation/test split is too small"
         )
 
     return X, y
 
 
-def create_loader(X, y, batch_size=32, shuffle=False):
+def create_loader(
+    X,
+    y,
+    batch_size=32,
+    shuffle=False
+):
+
     X = torch.tensor(X, dtype=torch.float32)
     y = torch.tensor(y, dtype=torch.float32)
 
@@ -234,16 +348,26 @@ def create_loader(X, y, batch_size=32, shuffle=False):
 
     sample_X, sample_y = next(iter(loader))
 
+    print("\n========== DATALOADER ==========")
+
     print("Batch input shape:", sample_X.shape)
     print("Batch target shape:", sample_y.shape)
 
     return loader
 
 
-def prepare_cnn_lstm_data(df, seq_length=24, batch_size=32):
+def prepare_cnn_lstm_data(
+    df,
+    input_seq_length=24,
+    output_seq_length=6,
+    batch_size=32
+):
+
     df = preprocess_data(df)
 
-    station_ids = sorted(df[STATION_COLUMN].unique().tolist())
+    station_ids = sorted(
+        df[STATION_COLUMN].unique().tolist()
+    )
 
     train_parts, val_parts, test_parts = split_data_by_station(df)
 
@@ -275,19 +399,22 @@ def prepare_cnn_lstm_data(df, seq_length=24, batch_size=32):
     X_train, y_train = create_sequences(
         train_parts,
         model_features,
-        seq_length
+        input_seq_length,
+        output_seq_length
     )
 
     X_val, y_val = create_sequences(
         val_parts,
         model_features,
-        seq_length
+        input_seq_length,
+        output_seq_length
     )
 
     X_test, y_test = create_sequences(
         test_parts,
         model_features,
-        seq_length
+        input_seq_length,
+        output_seq_length
     )
 
     print("\n========== FINAL DATA SHAPES ==========")
@@ -333,6 +460,7 @@ class CNNLSTMModel(nn.Module):
     def __init__(
         self,
         input_size,
+        output_seq_length=6,
         hidden_size=64,
         num_layers=2,
         dropout=0.3
@@ -364,7 +492,11 @@ class CNNLSTMModel(nn.Module):
             batch_first=True
         )
 
-        self.fc = nn.Linear(hidden_size, 1)
+        # Multi-step forecasting output
+        self.fc = nn.Linear(
+            hidden_size,
+            output_seq_length
+        )
 
     def forward(self, x):
 
@@ -382,10 +514,13 @@ class CNNLSTMModel(nn.Module):
 
         output, _ = self.lstm(x)
 
-        return self.fc(output[:, -1, :])
+        output = output[:, -1, :]
+
+        return self.fc(output)
 
 
 def evaluate_loss(model, loader, criterion):
+
     model.eval()
 
     total_loss = 0
@@ -394,9 +529,12 @@ def evaluate_loss(model, loader, criterion):
 
         for X_batch, y_batch in loader:
 
-            predictions = model(X_batch).view(-1)
+            predictions = model(X_batch)
 
-            loss = criterion(predictions, y_batch)
+            loss = criterion(
+                predictions,
+                y_batch
+            )
 
             total_loss += loss.item()
 
@@ -409,6 +547,7 @@ def train_model(
     val_loader,
     epochs=10
 ):
+
     criterion = nn.MSELoss()
 
     optimizer = torch.optim.Adam(
@@ -429,9 +568,12 @@ def train_model(
 
             optimizer.zero_grad()
 
-            predictions = model(X_batch).view(-1)
+            predictions = model(X_batch)
 
-            loss = criterion(predictions, y_batch)
+            loss = criterion(
+                predictions,
+                y_batch
+            )
 
             loss.backward()
 
@@ -460,6 +602,7 @@ def train_model(
 
 
 def evaluate_model(model, test_loader):
+
     model.eval()
 
     predictions = []
@@ -469,20 +612,53 @@ def evaluate_model(model, test_loader):
 
         for X_batch, y_batch in test_loader:
 
-            outputs = model(X_batch).view(-1)
+            outputs = model(X_batch)
 
             predictions.extend(outputs.numpy())
             actuals.extend(y_batch.numpy())
 
-    mse = mean_squared_error(actuals, predictions)
-    mae = mean_absolute_error(actuals, predictions)
+    predictions = np.array(predictions)
+    actuals = np.array(actuals)
+
+    mse = mean_squared_error(
+        actuals.flatten(),
+        predictions.flatten()
+    )
+
+    mae = mean_absolute_error(
+        actuals.flatten(),
+        predictions.flatten()
+    )
+
     rmse = np.sqrt(mse)
 
     print("\n========== MODEL EVALUATION ==========")
 
-    print("MSE:", mse)
-    print("MAE:", mae)
-    print("RMSE:", rmse)
+    print("Overall MSE:", mse)
+    print("Overall MAE:", mae)
+    print("Overall RMSE:", rmse)
+
+    # print("\n========== PER-STEP FORECAST METRICS ==========")
+
+    # for step in range(actuals.shape[1]):
+
+    #     step_mse = mean_squared_error(
+    #         actuals[:, step],
+    #         predictions[:, step]
+    #     )
+
+    #     step_mae = mean_absolute_error(
+    #         actuals[:, step],
+    #         predictions[:, step]
+    #     )
+
+    #     step_rmse = np.sqrt(step_mse)
+
+    #     print(f"\nForecast Step {step + 1}")
+
+    #     print(f"MSE: {step_mse:.6f}")
+    #     print(f"MAE: {step_mae:.6f}")
+    #     print(f"RMSE: {step_rmse:.6f}")
 
     return predictions, actuals, mse, mae, rmse
 
@@ -497,32 +673,43 @@ def plot_loss_curves(train_losses, val_losses):
     plt.ylabel("Loss")
 
     plt.title("Train vs Validation Loss")
-
     plt.legend()
-
     plt.show()
 
 
-def plot_predictions(actuals, predictions):
+def plot_predictions(
+    actuals,
+    predictions,
+    forecast_step=1
+):
+
+    step_index = forecast_step - 1
     plt.figure(figsize=(10, 4))
-
-    plt.plot(actuals, label="Actual")
-    plt.plot(predictions, label="Predicted")
-
+    plt.plot(
+        actuals[:, step_index],
+        label="Actual"
+    )
+    plt.plot(
+        predictions[:, step_index],
+        label="Predicted"
+    )
     plt.legend()
-
-    plt.title("Actual vs Predicted CO2 for CNN-LSTM")
-
+    plt.title(
+        f"Actual vs Predicted CO2 for CNN-LSTM "
+        f"(Forecast Step {forecast_step})"
+    )
     plt.show()
 
 
 def run_cnn_lstm_model(
     df,
     epochs=10,
-    seq_length=24,
+    input_seq_length=24,
+    output_seq_length=6,
     batch_size=32,
     show_prediction_plot=True
 ):
+
     (
         train_loader,
         val_loader,
@@ -530,12 +717,14 @@ def run_cnn_lstm_model(
         input_size
     ) = prepare_cnn_lstm_data(
         df,
-        seq_length=seq_length,
+        input_seq_length=input_seq_length,
+        output_seq_length=output_seq_length,
         batch_size=batch_size
     )
 
     model = CNNLSTMModel(
-        input_size=input_size
+        input_size=input_size,
+        output_seq_length=output_seq_length
     )
 
     model, train_losses, val_losses = train_model(
@@ -556,7 +745,12 @@ def run_cnn_lstm_model(
     )
 
     if show_prediction_plot:
-        plot_predictions(actuals, predictions)
+
+        plot_predictions(
+            actuals,
+            predictions,
+            forecast_step=1
+        )
 
     return {
         "model": model,

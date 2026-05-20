@@ -23,7 +23,7 @@ def run_pipeline():
     # Optional analysis plots
     # plot_time_series(df)
     # plot_heatmap(df)
-    plot_pca_analysis(df)
+    # plot_pca_analysis(df)
 
     cnn_results = run_cnn_lstm_model(df)
 
