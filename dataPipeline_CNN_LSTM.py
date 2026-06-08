@@ -16,7 +16,7 @@ from src.CNN_LSTM.CNN_LSTM import run_cnn_lstm_model
 def run_pipeline():
     print("Libraries imported..!")
 
-    csv_path = os.path.join(BASE_DIR, "data", "indoorAir.csv")
+    csv_path = os.path.join(BASE_DIR, "data", "indoorAir2.csv")
 
     df = load_prepare_data(csv_path)
 
