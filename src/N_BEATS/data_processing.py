@@ -18,6 +18,9 @@ def data_loading():
 
 def choose_feature(df):
     print("\n========== Feature Selecting ==========")
+
+    df = df[df["station_id"] != 6].copy()
+
     feature_df = df[
         [
             "ens160_aqi",
@@ -31,8 +34,10 @@ def choose_feature(df):
             "station_id",
         ]
     ].copy()
+
     print(feature_df.shape)
     feature_df.head()
+
     return feature_df
 
 

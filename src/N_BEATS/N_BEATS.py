@@ -110,7 +110,10 @@ def create_windows(data, feature_cols, target_col="target_co2_15min"):
 
         for i in range(input_size, len(station_data)):
             X_windows.append(X[i - input_size:i])
-            y_windows.append(y[i])
+
+            # Target belongs to the last timestamp inside the input window.
+            # Since target_col is already 15-min-ahead CO2, use i - 1.
+            y_windows.append(y[i - 1])
 
     return np.array(X_windows, dtype="float32"), np.array(y_windows, dtype="float32")
 
