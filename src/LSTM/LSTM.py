@@ -31,6 +31,24 @@ BASE_FEATURES = [
 TARGET = 'scd41_co2'
 STATION_COLUMN = 'station_id'
 
+TARGET_FEATURES = [
+    'scd41_co2',
+    'scd41_temperature',
+    'bme688_pressure',
+    'scd41_humidity',
+    'ens160_aqi',
+    'ens160_tvoc',
+]
+
+TARGET_DISPLAY_NAMES = {
+    'scd41_co2': 'CO2',
+    'scd41_temperature': 'Temperature',
+    'bme688_pressure': 'Pressure',
+    'scd41_humidity': 'Humidity',
+    'ens160_aqi': 'AQI',
+    'ens160_tvoc': 'TVOC',
+}
+
 
 def add_time_features(df):
     df = df.copy()
@@ -193,13 +211,13 @@ def split_data_by_station(df):
 
 #     return train_parts, val_parts, test_parts
 
-def fill_missing_parts(parts):
+def fill_missing_parts(parts, target=TARGET):
 
     cleaned_parts = []
 
     input_features = [
         col for col in BASE_FEATURES
-        if col != TARGET
+        if col != target
     ]
 
     for i, part in enumerate(parts):
@@ -210,7 +228,7 @@ def fill_missing_parts(parts):
         print(part.isna().sum().sum())
 
         # Remove rows with missing target
-        part = part.dropna(subset=[TARGET])
+        part = part.dropna(subset=[target])
 
         # Fill only input features
         part[input_features] = (
@@ -293,12 +311,13 @@ def create_sequences(
     data_parts,
     model_features,
     input_seq_length=24,
-    output_seq_length=6
+    output_seq_length=6,
+    target=TARGET
 ):
 
     X, y = [], []
 
-    target_index = model_features.index(TARGET)
+    target_index = model_features.index(target)
 
     for data in data_parts:
 
@@ -397,7 +416,8 @@ def prepare_lstm_data(
     df,
     input_seq_length=24,
     output_seq_length=6,
-    batch_size=32
+    batch_size=32,
+    target=TARGET
 ):
 
     df = preprocess_data(df)
@@ -409,9 +429,9 @@ def prepare_lstm_data(
     # Split BEFORE filling/scaling
     train_parts, val_parts, test_parts = split_data_by_station(df)
 
-    train_parts = fill_missing_parts(train_parts)
-    val_parts = fill_missing_parts(val_parts)
-    test_parts = fill_missing_parts(test_parts)
+    train_parts = fill_missing_parts(train_parts, target)
+    val_parts = fill_missing_parts(val_parts, target)
+    test_parts = fill_missing_parts(test_parts, target)
 
     train_parts, model_features = build_model_parts(
         train_parts,
@@ -438,21 +458,24 @@ def prepare_lstm_data(
         train_parts,
         model_features,
         input_seq_length,
-        output_seq_length
+        output_seq_length,
+        target
     )
 
     X_val, y_val = create_sequences(
         val_parts,
         model_features,
         input_seq_length,
-        output_seq_length
+        output_seq_length,
+        target
     )
 
     X_test, y_test = create_sequences(
         test_parts,
         model_features,
         input_seq_length,
-        output_seq_length
+        output_seq_length,
+        target
     )
 
     print("\n========== FINAL DATA SHAPES ==========")
@@ -646,7 +669,9 @@ def evaluate_model(model, test_loader):
 
 def plot_loss_curves(
     train_losses,
-    val_losses
+    val_losses,
+    target=TARGET,
+    output_seq_length=None
 ):
 
     plt.figure(figsize=(8, 4))
@@ -657,38 +682,69 @@ def plot_loss_curves(
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
 
-    plt.title("Train vs Validation Loss")
+    target_name = TARGET_DISPLAY_NAMES.get(target, target)
+    title = f"Train vs Validation Loss - {target_name}"
+    if output_seq_length is not None:
+        title += f" (Output Length {output_seq_length})"
+
+    plt.title(title)
 
     plt.legend()
 
     plt.show()
 
 
-def plot_predictions(actuals, predictions, forecast_step=1):
+def plot_predictions(
+    actuals,
+    predictions,
+    forecast_step=1,
+    target=TARGET,
+    max_points=200
+):
 
     step_index = forecast_step - 1
+    if step_index < 0 or step_index >= actuals.shape[1]:
+        raise ValueError(
+            f"forecast_step must be between 1 and {actuals.shape[1]}"
+        )
+
+    target_name = TARGET_DISPLAY_NAMES.get(target, target)
+
     plt.figure(figsize=(10, 4))
 
     # Plot one forecast horizon only. Flattening multi-step outputs mixes
     # overlapping windows and creates a misleading zig-zag plot.
     plt.plot(
-        actuals[:, step_index],
+        actuals[:max_points, step_index],
         label="Actual"
     )
 
     plt.plot(
-        predictions[:, step_index],
+        predictions[:max_points, step_index],
         label="Predicted"
     )
 
     plt.legend()
 
     plt.title(
-        f"Actual vs Predicted CO2 for LSTM "
-        f"(Forecast Step {forecast_step})"
+        f"Actual vs Predicted {target_name} for LSTM "
+        f"(Forecast Horizon {forecast_step})"
     )
 
+    plt.xlabel("Time Steps")
+    plt.ylabel(f"Scaled {target_name}")
+
     plt.show()
+
+
+def get_forecast_steps_to_plot(output_seq_length):
+
+    forecast_steps = [1]
+
+    if output_seq_length != 1:
+        forecast_steps.append(output_seq_length)
+
+    return forecast_steps
 
 
 def run_lstm_model(
@@ -696,14 +752,32 @@ def run_lstm_model(
     epochs=10,
     input_seq_length=24,
     output_seq_length=6,
-    show_prediction_plot=True
+    show_prediction_plot=True,
+    target=TARGET
 ):
+
+    if target not in BASE_FEATURES:
+        raise ValueError(f"Unknown target feature: {target}")
+
+    target_name = TARGET_DISPLAY_NAMES.get(target, target)
+
+    print(
+        "\n=================================================="
+    )
+    print(
+        f"RUNNING LSTM EXPERIMENT: Target = {target_name} "
+        f"({target}) | Output Length = {output_seq_length}"
+    )
+    print(
+        "=================================================="
+    )
 
     train_loader, val_loader, test_loader, input_size = (
         prepare_lstm_data(
             df,
             input_seq_length,
-            output_seq_length
+            output_seq_length,
+            target=target
         )
     )
 
@@ -726,17 +800,56 @@ def run_lstm_model(
 
     plot_loss_curves(
         train_losses,
-        val_losses
+        val_losses,
+        target=target,
+        output_seq_length=output_seq_length
     )
 
     if show_prediction_plot:
-        plot_predictions(actuals, predictions, forecast_step=1)
+        for forecast_step in get_forecast_steps_to_plot(output_seq_length):
+            plot_predictions(
+                actuals,
+                predictions,
+                forecast_step=forecast_step,
+                target=target
+            )
 
     return {
         "model": model,
+        "target": target,
+        "output_seq_length": output_seq_length,
         "predictions": predictions,
         "actuals": actuals,
         "mse": mse,
         "mae": mae,
         "rmse": rmse,
+        "train_losses": train_losses,
+        "val_losses": val_losses,
     }
+
+
+def run_lstm_experiments(
+    df,
+    epochs=10,
+    input_seq_length=24,
+    output_seq_length=6,
+    target_features=None,
+    show_prediction_plot=True
+):
+
+    if target_features is None:
+        target_features = TARGET_FEATURES
+
+    results = {}
+
+    for target in target_features:
+        results[target] = run_lstm_model(
+            df,
+            epochs=epochs,
+            input_seq_length=input_seq_length,
+            output_seq_length=output_seq_length,
+            target=target,
+            show_prediction_plot=show_prediction_plot
+        )
+
+    return results

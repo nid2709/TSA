@@ -1,0 +1,201 @@
+import os
+
+MPL_CONFIG_DIR = os.path.join(
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")),
+    ".matplotlib"
+)
+os.makedirs(MPL_CONFIG_DIR, exist_ok=True)
+os.environ.setdefault("MPLCONFIGDIR", MPL_CONFIG_DIR)
+
+import random
+import numpy as np
+import torch
+import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
+
+from src.LSTM.LSTM_co2 import (
+    LSTMModel,
+    train_model,
+    evaluate_model,
+    plot_loss_curves,
+    get_lstm_results_dir,
+)
+
+
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+
+def plot_deep_ensemble_uncertainty(
+    actuals,
+    mean_predictions,
+    std_predictions,
+    forecast_step=1,
+    max_plot_points=500,
+    target_label="CO2",
+    results_dir=None
+):
+    step_index = forecast_step - 1
+
+    x_values = np.arange(len(actuals))
+
+    actual_values = actuals[:, step_index]
+    mean_values = mean_predictions[:, step_index]
+    std_values = std_predictions[:, step_index]
+
+    lower_bound = mean_values - 1.96 * std_values
+    upper_bound = mean_values + 1.96 * std_values
+
+    if len(x_values) > max_plot_points:
+        x_values = x_values[:max_plot_points]
+        actual_values = actual_values[:max_plot_points]
+        mean_values = mean_values[:max_plot_points]
+        lower_bound = lower_bound[:max_plot_points]
+        upper_bound = upper_bound[:max_plot_points]
+
+    fig, ax = plt.subplots(figsize=(11, 4))
+
+    ax.plot(x_values, actual_values, label="Actual")
+    ax.plot(x_values, mean_values, label="Ensemble Mean Prediction")
+
+    ax.fill_between(
+        x_values,
+        lower_bound,
+        upper_bound,
+        alpha=0.3,
+        label="95% Ensemble Uncertainty Band"
+    )
+
+    ax.set_xlabel("Test sample index")
+    ax.set_ylabel(f"Scaled {target_label}")
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=8, integer=True))
+
+    ax.set_title(
+        f"Deep Ensemble Uncertainty for LSTM "
+        f"(Forecast Step {forecast_step})"
+    )
+
+    ax.legend()
+    fig.tight_layout()
+
+    if results_dir is None:
+        results_dir = get_lstm_results_dir()
+
+    os.makedirs(os.path.join(results_dir, "deep_ensemble"), exist_ok=True)
+
+    save_path = os.path.join(
+        results_dir,
+        "deep_ensemble",
+        f"deep_ensemble_uncertainty_step_{forecast_step}.png"
+    )
+    plt.savefig(save_path, dpi=300)
+    print("Saved plot:", save_path)
+
+    plt.show()
+    plt.close()
+
+
+def run_deep_ensemble_uq(
+    train_loader,
+    val_loader,
+    test_loader,
+    input_size,
+    actuals,
+    output_seq_length,
+    target_label="CO2",
+    epochs=10,
+    n_models=3,
+    seeds=None,
+    results_dir=None
+):
+    if seeds is None:
+        seeds = [11, 22, 33]
+
+    if results_dir is None:
+        results_dir = get_lstm_results_dir()
+
+    ensemble_predictions = []
+
+    print("\n========== DEEP ENSEMBLE UQ ==========")
+    print("Number of ensemble models:", n_models)
+    print("Saving Deep Ensemble plots to:", results_dir)
+
+    for i in range(n_models):
+        seed = seeds[i]
+        set_seed(seed)
+
+        print(f"\nTraining Ensemble Model {i + 1}/{n_models}")
+        print("Seed:", seed)
+
+        model = LSTMModel(
+            input_size=input_size,
+            output_seq_length=output_seq_length
+        )
+
+        model, train_losses, val_losses = train_model(
+            model,
+            train_loader,
+            val_loader,
+            epochs=epochs
+        )
+
+        predictions, _, mse, mae, rmse, r2 = evaluate_model(
+            model,
+            test_loader
+        )
+
+        print(
+            f"Model {i + 1} Results -> "
+            f"MSE: {mse:.6f}, MAE: {mae:.6f}, "
+            f"RMSE: {rmse:.6f}, R2: {r2:.6f}"
+        )
+
+        ensemble_predictions.append(predictions)
+
+    ensemble_predictions = np.array(ensemble_predictions)
+
+    mean_predictions = ensemble_predictions.mean(axis=0)
+    std_predictions = ensemble_predictions.std(axis=0)
+
+    avg_uncertainty = np.mean(std_predictions)
+    max_uncertainty = np.max(std_predictions)
+
+    print("\n========== DEEP ENSEMBLE RESULTS ==========")
+    print("Ensemble predictions shape:", ensemble_predictions.shape)
+    print("Mean prediction shape:", mean_predictions.shape)
+    print("Std prediction shape:", std_predictions.shape)
+
+    print("\n========== ENSEMBLE UNCERTAINTY STATISTICS ==========")
+    print(f"Average uncertainty: {avg_uncertainty:.6f}")
+    print(f"Maximum uncertainty: {max_uncertainty:.6f}")
+
+    plot_deep_ensemble_uncertainty(
+        actuals,
+        mean_predictions,
+        std_predictions,
+        forecast_step=1,
+        target_label=target_label,
+        results_dir=results_dir
+    )
+
+    if output_seq_length > 1:
+        plot_deep_ensemble_uncertainty(
+            actuals,
+            mean_predictions,
+            std_predictions,
+            forecast_step=output_seq_length,
+            target_label=target_label,
+            results_dir=results_dir
+        )
+
+    print("\n========== LSTM DEEP ENSEMBLE FINISHED ==========")
+
+    return {
+        "ensemble_predictions": ensemble_predictions,
+        "mean_predictions": mean_predictions,
+        "std_predictions": std_predictions,
+        "average_uncertainty": avg_uncertainty,
+        "maximum_uncertainty": max_uncertainty
+    }

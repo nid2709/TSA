@@ -1,6 +1,5 @@
 import os
 
-
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 from src.CNN_LSTM.dataLoad import (
@@ -9,7 +8,6 @@ from src.CNN_LSTM.dataLoad import (
     plot_heatmap,
     plot_pca_analysis
 )
-
 from src.CNN_LSTM.CNN_LSTM import run_cnn_lstm_model
 
 
@@ -17,7 +15,6 @@ def run_pipeline():
     print("Libraries imported..!")
 
     csv_path = os.path.join(BASE_DIR, "data", "indoorAir2.csv")
-
     df = load_prepare_data(csv_path)
 
     # Optional analysis plots
@@ -25,7 +22,15 @@ def run_pipeline():
     # plot_heatmap(df)
     # plot_pca_analysis(df)
 
-    cnn_results = run_cnn_lstm_model(df)
+    # Change this value to automatically plot Horizon 1 and Horizon X graphs
+    output_seq_length = 6 
+    
+    cnn_results = run_cnn_lstm_model(
+        df,
+        output_seq_length=output_seq_length
+    )
+    
+    #print(cnn_results.keys())  # Matches your LSTM output logic check for SHAP
 
     return cnn_results
 
