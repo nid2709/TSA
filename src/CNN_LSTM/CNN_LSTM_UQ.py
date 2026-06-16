@@ -75,7 +75,7 @@ def plot_mc_dropout_uncertainty(
     mean_predictions,
     std_predictions,
     forecast_step=1,
-    max_plot_points=500,
+    max_plot_points=None,
     target_label="CO2",
     results_dir=None
 ):
@@ -99,7 +99,7 @@ def plot_mc_dropout_uncertainty(
     lower_bound = mean_values - 1.96 * std_values
     upper_bound = mean_values + 1.96 * std_values
 
-    if len(x_values) > max_plot_points:
+    if max_plot_points is not None and len(x_values) > max_plot_points:
         x_values = x_values[:max_plot_points]
         actual_values = actual_values[:max_plot_points]
         mean_values = mean_values[:max_plot_points]
@@ -154,7 +154,7 @@ def plot_mc_dropout_uncertainty(
         f"mc_dropout_uncertainty_step_{forecast_step}.png"
     )
     plt.savefig(save_path, dpi=300)
-    print("Saved plot:", save_path)
+    #print("Saved plot:", save_path)
 
     plt.show()
     plt.close()

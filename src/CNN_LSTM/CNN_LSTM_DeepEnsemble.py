@@ -33,7 +33,7 @@ def plot_deep_ensemble_uncertainty(
     mean_predictions,
     std_predictions,
     forecast_step=1,
-    max_plot_points=500,
+    max_plot_points=None,
     target_label="CO2",
     results_dir=None
 ):
@@ -91,7 +91,7 @@ def plot_deep_ensemble_uncertainty(
         f"deep_ensemble_uncertainty_step_{forecast_step}.png"
     )
     plt.savefig(save_path, dpi=300)
-    print("Saved plot:", save_path)
+    #print("Saved plot:", save_path)
 
     plt.show()
     plt.close()

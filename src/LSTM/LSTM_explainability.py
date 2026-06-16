@@ -15,7 +15,11 @@ from sklearn.metrics import mean_squared_error
 from captum.attr import IntegratedGradients
 
 from src.LSTM.dataLoad import load_prepare_data
-from src.LSTM.LSTM_co2 import run_lstm_model, get_lstm_results_dir
+from src.LSTM.LSTM_co2 import (
+    run_lstm_model,
+    get_lstm_results_dir,
+    DEFAULT_OUTPUT_SEQ_LENGTH
+)
 
 #============================== START:SHAP =============================
 def run_shap_experiment(results=None):
@@ -26,7 +30,7 @@ def run_shap_experiment(results=None):
 
         results = run_lstm_model(
             df,
-            output_seq_length=12,
+            output_seq_length=DEFAULT_OUTPUT_SEQ_LENGTH,
             show_prediction_plot=False
         )
 

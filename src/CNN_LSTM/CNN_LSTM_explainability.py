@@ -17,7 +17,8 @@ from captum.attr import IntegratedGradients
 from src.CNN_LSTM.dataLoad import load_prepare_data
 from src.CNN_LSTM.CNN_LSTM_co2 import (
     run_cnn_lstm_model,
-    get_cnn_lstm_results_dir
+    get_cnn_lstm_results_dir,
+    DEFAULT_OUTPUT_SEQ_LENGTH
 )
 
 # This helper is for SHAP Explainability because different SHAP versions can
@@ -50,7 +51,7 @@ def run_shap_experiment(results=None):
 
         results = run_cnn_lstm_model(
             df,
-            output_seq_length=12,
+            output_seq_length=DEFAULT_OUTPUT_SEQ_LENGTH,
             show_prediction_plot=False
         )
 
@@ -144,7 +145,7 @@ def run_shap_experiment(results=None):
         "shap_global_feature_importance_cnn_lstm.png"
     )
     plt.savefig(save_path, dpi=300)
-    print("Saved plot:", save_path)
+    #print("Saved plot:", save_path)
 
     plt.show()
     plt.close()
@@ -280,7 +281,7 @@ def run_pfi_analysis(
         "pfi_feature_importance_cnn_lstm.png"
     )
     plt.savefig(save_path, dpi=300)
-    print("Saved plot:", save_path)
+    #print("Saved plot:", save_path)
 
     plt.show()
     plt.close()
@@ -392,7 +393,7 @@ def run_integrated_gradients_analysis(
         f"ig_feature_importance_cnn_lstm_step_{forecast_step}.png"
     )
     plt.savefig(save_path, dpi=300)
-    print("Saved plot:", save_path)
+    #print("Saved plot:", save_path)
 
     plt.show()
     plt.close()
@@ -422,7 +423,7 @@ def run_integrated_gradients_analysis(
         f"ig_temporal_importance_cnn_lstm_step_{forecast_step}.png"
     )
     plt.savefig(save_path, dpi=300)
-    print("Saved plot:", save_path)
+    #print("Saved plot:", save_path)
 
     plt.show()
     plt.close()

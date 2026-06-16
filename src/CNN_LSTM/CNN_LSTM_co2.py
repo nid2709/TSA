@@ -43,7 +43,7 @@ STATION_COLUMN = 'station_id'
 DEFAULT_INPUT_SEQ_LENGTH = 144
 DEFAULT_OUTPUT_SEQ_LENGTH = 48
 DEFAULT_BATCH_SIZE = 32
-DEFAULT_EPOCHS = 50
+DEFAULT_EPOCHS = 10
 DEFAULT_LEARNING_RATE = 0.00001
 DEFAULT_HIDDEN_SIZE = 128
 
@@ -608,7 +608,7 @@ def plot_loss_curves(train_losses, val_losses, results_dir=None):
             "train_validation_loss.png"
         )
         plt.savefig(save_path, dpi=300)
-        print("Saved plot:", save_path)
+        #print("Saved plot:", save_path)
 
     plt.show()
     plt.close()
@@ -653,7 +653,7 @@ def plot_predictions(
             f"actual_vs_predicted_step_{forecast_step}.png"
         )
         plt.savefig(save_path, dpi=300)
-        print("Saved plot:", save_path)
+        #print("Saved plot:", save_path)
 
     plt.show()
     plt.close()
