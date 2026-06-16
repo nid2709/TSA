@@ -18,8 +18,32 @@ def data_loading():
     return df
 
 
+# def choose_feature(df):
+#     print("\n========== Choose Feature ==========")
+
+#     feature_df = df[
+#         [
+#             "ens160_aqi",
+#             "ens160_tvoc",
+#             "bme688_gas_resistance",
+#             "bme688_pressure",
+#             "scd41_temperature",
+#             "scd41_humidity",
+#             "timestamp",
+#             "scd41_co2",
+#             "station_id",
+#         ]
+#     ].copy()
+
+#     print(feature_df.shape)
+#     feature_df.head()
+
+#     return feature_df
+
 def choose_feature(df):
-    print("\n========== Choose Feature ==========")
+    print("\n========== Feature Selecting ==========")
+
+    df = df[df["station_id"] != 6].copy()
 
     feature_df = df[
         [
@@ -29,11 +53,31 @@ def choose_feature(df):
             "bme688_pressure",
             "scd41_temperature",
             "scd41_humidity",
-            "timestamp",
             "scd41_co2",
+            "timestamp",
             "station_id",
         ]
     ].copy()
+
+    feature_df["timestamp_seconds"] = (
+        feature_df["timestamp"].astype("int64") // 10**9
+    )
+
+    hour = (
+        feature_df["timestamp"].dt.hour
+        + feature_df["timestamp"].dt.minute / 60
+        + feature_df["timestamp"].dt.second / 3600
+    )
+
+    dayofweek = feature_df["timestamp"].dt.dayofweek
+
+    feature_df["hour_sin"] = np.sin(2 * np.pi * hour / 24)
+    feature_df["hour_cos"] = np.cos(2 * np.pi * hour / 24)
+
+    feature_df["dayofweek_sin"] = np.sin(2 * np.pi * dayofweek / 7)
+    feature_df["dayofweek_cos"] = np.cos(2 * np.pi * dayofweek / 7)
+
+    feature_df["is_weekend"] = dayofweek.isin([5, 6]).astype(int)
 
     print(feature_df.shape)
     feature_df.head()

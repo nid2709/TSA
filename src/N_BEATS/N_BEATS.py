@@ -8,9 +8,26 @@ import torch.optim as optim
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.preprocessing import MinMaxScaler
 from torch.utils.data import DataLoader, TensorDataset
+from src.N_BEATS.explainability import run_explainability
 
 
-input_size = 60
+HISTORY_DAYS = 5
+PREDICTION_HOURS = 2
+RESAMPLE_FREQ = "15min"
+
+STEPS_PER_HOUR = int(pd.Timedelta(hours=1) / pd.Timedelta(RESAMPLE_FREQ))
+
+input_size = HISTORY_DAYS * 24 * STEPS_PER_HOUR  # 480
+horizon = PREDICTION_HOURS * STEPS_PER_HOUR      # 8
+
+learning_rate = 0.0001
+dropout = 0.25
+hidden_dim = 64
+num_blocks = 2
+num_layers = 2
+batch_size = 128
+num_epochs = 50
+weight_decay = 1e-4
 
 def train_val_test_spliting(feature_df):
     print("\n========== Train, Validation and Train ==========")
@@ -103,17 +120,15 @@ def create_windows(data, feature_cols, target_col="target_co2_15min"):
     y_windows = []
 
     data = data.sort_values(["station_id", "timestamp"])
+    forecast_offset = horizon  # 8 rows = 2 hours
 
     for station_id, station_data in data.groupby("station_id"):
         X = station_data[feature_cols].values.astype("float32")
         y = station_data[target_col].values.astype("float32")
 
-        for i in range(input_size, len(station_data)):
+        for i in range(input_size, len(station_data) - forecast_offset + 1):
             X_windows.append(X[i - input_size:i])
-
-            # Target belongs to the last timestamp inside the input window.
-            # Since target_col is already 15-min-ahead CO2, use i - 1.
-            y_windows.append(y[i - 1])
+            y_windows.append(y[i + forecast_offset - 1])
 
     return np.array(X_windows, dtype="float32"), np.array(y_windows, dtype="float32")
 
@@ -133,7 +148,7 @@ def window_creation(train_df_scaled, val_df_scaled, test_df_scaled, feature_cols
 
 def tensor_and_dataloader(X_train, y_train, X_val, y_val, X_test, y_test):
     print("\n========== Tensor and DataLoader ==========")
-    batch_size = 64
+    batch_size = 128
 
     X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
     y_train_tensor = torch.tensor(y_train, dtype=torch.float32).unsqueeze(1)
@@ -160,17 +175,18 @@ def tensor_and_dataloader(X_train, y_train, X_val, y_val, X_test, y_test):
 
 
 class NBeatsBlock(nn.Module):
-    def __init__(self, input_dim, hidden_dim, theta_dim, num_layers=4):
+    def __init__(self, input_dim, hidden_dim, theta_dim, num_layers=2, dropout=0.25):
         super(NBeatsBlock, self).__init__()
 
-        layers = [
-            nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
-        ]
+        layers = []
 
-        for _ in range(num_layers - 1):
-            layers.append(nn.Linear(hidden_dim, hidden_dim))
+        for layer_idx in range(num_layers):
+            in_dim = input_dim if layer_idx == 0 else hidden_dim
+            layers.append(nn.Linear(in_dim, hidden_dim))
             layers.append(nn.ReLU())
+
+            if dropout > 0:
+                layers.append(nn.Dropout(dropout))
 
         self.fc = nn.Sequential(*layers)
         self.backcast_layer = nn.Linear(hidden_dim, input_dim)
@@ -190,10 +206,11 @@ class NBeats(nn.Module):
         self,
         input_size,
         num_features,
-        hidden_dim=256,
+        hidden_dim=64,
         num_blocks=2,
-        num_layers=3,
-        horizon=1,
+        num_layers=2,
+        horizon=8,
+        dropout=0.25,
     ):
         super(NBeats, self).__init__()
 
@@ -206,6 +223,7 @@ class NBeats(nn.Module):
                 hidden_dim=hidden_dim,
                 theta_dim=horizon,
                 num_layers=num_layers,
+                dropout=dropout,
             )
             for _ in range(num_blocks)
         ])
@@ -236,10 +254,11 @@ def print_model(X_train):
     model = NBeats(
         input_size=input_size,
         num_features=num_features,
-        hidden_dim=256,
-        num_blocks=2,
-        num_layers=3,
+        hidden_dim=hidden_dim,
+        num_blocks=num_blocks,
+        num_layers=num_layers,
         horizon=horizon,
+        dropout=dropout,
     )
 
     print(model)
@@ -252,8 +271,8 @@ def loss_function(model):
 
     optimizer = optim.Adam(
         model.parameters(),
-        lr=0.001,
-        weight_decay=1e-5,
+        lr=learning_rate,
+        weight_decay=weight_decay,
     )
 
     print("Loss function:", criterion)
@@ -283,15 +302,12 @@ def print_batch_size_and_minmax_with_batch_loss(train_loader, model, criterion):
 
 def epochs(model, train_loader, val_loader, optimizer, criterion):
     print("\n========== Epochs Training ==========")
-    num_epochs = 30
-    patience = 10
 
     train_losses = []
     val_losses = []
 
     best_val_loss = float("inf")
     best_model_state = None
-    epochs_without_improvement = 0
 
     for epoch in range(num_epochs):
         model.train()
@@ -317,7 +333,6 @@ def epochs(model, train_loader, val_loader, optimizer, criterion):
             for X_batch, y_batch in val_loader:
                 y_pred = model(X_batch)
                 loss = criterion(y_pred, y_batch)
-
                 running_val_loss += loss.item()
 
         avg_val_loss = running_val_loss / len(val_loader)
@@ -334,13 +349,6 @@ def epochs(model, train_loader, val_loader, optimizer, criterion):
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
             best_model_state = copy.deepcopy(model.state_dict())
-            epochs_without_improvement = 0
-        else:
-            epochs_without_improvement += 1
-
-        if epochs_without_improvement >= patience:
-            print(f"Early stopping at epoch {epoch + 1}")
-            break
 
     model.load_state_dict(best_model_state)
 
@@ -424,6 +432,90 @@ def matrix_value_with_inverse_scaling(test_actuals_original, test_predictions_or
     print("Test R2:", r2)
 
     return mae, mse, rmse, r2
+
+
+# Uncertainity Tecunique
+def conformal_uncertainty_quantification(
+    model,
+    val_loader,
+    y_scaler,
+    test_predictions_original,
+    test_actuals_original,
+    alpha=0.10,
+):
+    print("\n========== Uncertainty Quantification: Split Conformal Prediction ==========")
+
+    model.eval()
+
+    val_predictions = []
+    val_actuals = []
+
+    with torch.no_grad():
+        for X_batch, y_batch in val_loader:
+            y_pred = model(X_batch)
+
+            val_predictions.append(y_pred.cpu().numpy())
+            val_actuals.append(y_batch.cpu().numpy())
+
+    val_predictions = np.vstack(val_predictions)
+    val_actuals = np.vstack(val_actuals)
+
+    val_predictions_original = y_scaler.inverse_transform(val_predictions)
+    val_actuals_original = y_scaler.inverse_transform(val_actuals)
+
+    calibration_errors = np.abs(val_actuals_original - val_predictions_original)
+
+    q_hat = np.quantile(calibration_errors, 1 - alpha)
+
+    test_lower = test_predictions_original - q_hat
+    test_upper = test_predictions_original + q_hat
+
+    coverage = np.mean(
+        (test_actuals_original >= test_lower)
+        & (test_actuals_original <= test_upper)
+    )
+
+    mean_interval_width = np.mean(test_upper - test_lower)
+
+    print("UQ Technique Used: Split Conformal Prediction")
+    print("Confidence Level:", int((1 - alpha) * 100), "%")
+    print("Conformal calibration quantile q_hat:", q_hat)
+    print("Prediction interval coverage:", coverage)
+    print("Mean prediction interval width:", mean_interval_width)
+
+    n_plot = min(300, len(test_predictions_original))
+
+    plt.figure(figsize=(14, 5))
+    plt.plot(
+        test_actuals_original[:n_plot],
+        label="Actual CO2",
+        color="black",
+        linewidth=1.5,
+    )
+    plt.plot(
+        test_predictions_original[:n_plot],
+        label="N-BEATS Prediction",
+        color="blue",
+        linewidth=1.5,
+    )
+    plt.fill_between(
+        np.arange(n_plot),
+        test_lower[:n_plot, 0],
+        test_upper[:n_plot, 0],
+        color="blue",
+        alpha=0.2,
+        label="90% Conformal Prediction Interval",
+    )
+
+    plt.xlabel("Test Sample")
+    plt.ylabel("CO2")
+    plt.title("N-BEATS Forecast with 90% Conformal Prediction Interval")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+    return test_lower, test_upper, q_hat, coverage, mean_interval_width
 
 
 def graph_for_actual_vs_predection(test_actuals_original, test_predictions_original):
@@ -526,6 +618,15 @@ def model_pipeline(feature_df):
         test_predictions_original,
     )
 
+    test_lower, test_upper, q_hat, coverage, mean_interval_width = conformal_uncertainty_quantification(
+        model=model,
+        val_loader=val_loader,
+        y_scaler=y_scaler,
+        test_predictions_original=test_predictions_original,
+        test_actuals_original=test_actuals_original,
+        alpha=0.10,
+    )
+
     graph_for_actual_vs_predection(
         test_actuals_original,
         test_predictions_original,
@@ -534,6 +635,14 @@ def model_pipeline(feature_df):
     graph_for_scatter_actual_vs_prediction(
         test_actuals_original,
         test_predictions_original,
+    )
+
+    run_explainability(
+        model=model,
+        X_train=X_train,
+        X_test=X_test,
+        y_test=y_test,
+        feature_cols=feature_cols,
     )
 
     return model

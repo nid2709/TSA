@@ -1,5 +1,6 @@
 from pathlib import Path
 import pandas as pd
+import numpy as np
 
 
 def data_loading():
@@ -29,8 +30,8 @@ def choose_feature(df):
             "bme688_pressure",
             "scd41_temperature",
             "scd41_humidity",
-            "timestamp",
             "scd41_co2",
+            "timestamp",
             "station_id",
         ]
     ].copy()
@@ -128,7 +129,7 @@ def add_15_min_ahead_column(feature_df):
 
 
 def missing_value(feature_df):
-    print("\n========== MIssing Values ==========")
+    print("\n========== Missing Values ==========")
     cols_to_fill = ["bme688_gas_resistance", "bme688_pressure"]
 
     feature_df = feature_df.sort_values(["station_id", "timestamp"]).reset_index(drop=True)
