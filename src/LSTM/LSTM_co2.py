@@ -45,11 +45,13 @@ TARGET = DEFAULT_TARGET
 STATION_COLUMN = 'station_id'
 
 DEFAULT_INPUT_SEQ_LENGTH = 144
-DEFAULT_OUTPUT_SEQ_LENGTH = 48
+DEFAULT_OUTPUT_SEQ_LENGTH = 24
 DEFAULT_BATCH_SIZE = 32
-DEFAULT_EPOCHS = 10
+DEFAULT_EPOCHS = 30
 DEFAULT_LEARNING_RATE = 0.00001
-DEFAULT_HIDDEN_SIZE = 128
+DEFAULT_HIDDEN_SIZE = 64
+DEFAULT_RESAMPLE_TIME = '30min'
+DEFAULT_DROPOUT_RATE = 0.15
 
 TARGET_LABELS = {
     'scd41_co2': 'CO2',
@@ -75,7 +77,9 @@ def get_lstm_results_dir(
     batch_size=DEFAULT_BATCH_SIZE,
     epochs=DEFAULT_EPOCHS,
     learning_rate=DEFAULT_LEARNING_RATE,
-    hidden_size=DEFAULT_HIDDEN_SIZE
+    hidden_size=DEFAULT_HIDDEN_SIZE,
+    resample_time=DEFAULT_RESAMPLE_TIME,
+    dropout_rate=DEFAULT_DROPOUT_RATE
 ):
     project_root = os.path.abspath(
         os.path.join(os.path.dirname(__file__), "..", "..")
@@ -88,7 +92,9 @@ def get_lstm_results_dir(
         f"BS{batch_size}_"
         f"EPOCH{epochs}_"
         f"LR{learning_rate}_"
-        f"HS{hidden_size}"
+        f"HS{hidden_size}_"
+        f"RS{resample_time}_"
+        f"DR{dropout_rate}"
     )
 
     return os.path.join(project_root, folder_name)
@@ -121,7 +127,11 @@ def add_time_features(df):
     return df
 
 
-def preprocess_data(df, target_column=DEFAULT_TARGET):
+def preprocess_data(
+    df,
+    target_column=DEFAULT_TARGET,
+    resample_time=DEFAULT_RESAMPLE_TIME
+):
     df = df.copy()
     feature_columns = get_feature_columns(target_column)
 
@@ -160,13 +170,13 @@ def preprocess_data(df, target_column=DEFAULT_TARGET):
     # Resample each station independently
     df = (
         df.groupby(STATION_COLUMN)
-        .resample('15min')
+        .resample(resample_time)
         .mean()
         .drop(columns=STATION_COLUMN, errors='ignore')
         .reset_index(level=0)
     )
 
-    print("\nDataset shape after 15-minute resampling:", df.shape)
+    print(f"\nDataset shape after {resample_time} resampling:", df.shape)
     print("Rows after resampling:", len(df))
 
     return df[feature_columns + [STATION_COLUMN]]
@@ -574,14 +584,16 @@ def prepare_lstm_data(
     input_seq_length=DEFAULT_INPUT_SEQ_LENGTH,
     output_seq_length=DEFAULT_OUTPUT_SEQ_LENGTH,
     batch_size=DEFAULT_BATCH_SIZE,
-    target_column=DEFAULT_TARGET
+    target_column=DEFAULT_TARGET,
+    resample_time=DEFAULT_RESAMPLE_TIME
 ):
 
     feature_columns = get_feature_columns(target_column)
 
     df = preprocess_data(
         df,
-        target_column
+        target_column,
+        resample_time
     )
 
     station_ids = sorted(
@@ -696,7 +708,7 @@ class LSTMModel(nn.Module):
         output_seq_length=DEFAULT_OUTPUT_SEQ_LENGTH,
         hidden_size=DEFAULT_HIDDEN_SIZE,
         num_layers=2,
-        dropout_rate=0.2
+        dropout_rate=DEFAULT_DROPOUT_RATE
     ):
         super().__init__()
 
@@ -923,7 +935,7 @@ def plot_predictions(
     actuals,
     predictions,
     forecast_step=1,
-    max_plot_points=500,
+    max_plot_points=1500,
     target_column=DEFAULT_TARGET,
     results_dir=None
 ):
@@ -940,7 +952,7 @@ def plot_predictions(
     actual_values = actuals[:, step_index]
     predicted_values = predictions[:, step_index]
 
-    if len(x_values) > max_plot_points:
+    if max_plot_points is not None and len(x_values) > max_plot_points:
         x_values = x_values[:max_plot_points]
         actual_values = actual_values[:max_plot_points]
         predicted_values = predicted_values[:max_plot_points]
@@ -1022,6 +1034,10 @@ def run_lstm_model(
     output_seq_length=DEFAULT_OUTPUT_SEQ_LENGTH,
     batch_size=DEFAULT_BATCH_SIZE,
     target_column=DEFAULT_TARGET,
+    learning_rate=DEFAULT_LEARNING_RATE,
+    hidden_size=DEFAULT_HIDDEN_SIZE,
+    dropout_rate=DEFAULT_DROPOUT_RATE,
+    resample_time=DEFAULT_RESAMPLE_TIME,
     show_prediction_plot=True
 ):
 
@@ -1038,19 +1054,23 @@ def run_lstm_model(
         input_seq_length,
         output_seq_length,
         batch_size,
-        target_column=target_column
+        target_column=target_column,
+        resample_time=resample_time
     )
 
     model = LSTMModel(
         input_size=input_size,
-        output_seq_length=output_seq_length
+        output_seq_length=output_seq_length,
+        hidden_size=hidden_size,
+        dropout_rate=dropout_rate
     )
 
     model, train_losses, val_losses = train_model(
         model,
         train_loader,
         val_loader,
-        epochs
+        epochs,
+        learning_rate=learning_rate
     )
 
     predictions, actuals, mse, mae, rmse, r2 = evaluate_model(
@@ -1062,7 +1082,11 @@ def run_lstm_model(
         input_seq_length=input_seq_length,
         output_seq_length=output_seq_length,
         batch_size=batch_size,
-        epochs=epochs
+        epochs=epochs,
+        learning_rate=learning_rate,
+        hidden_size=hidden_size,
+        resample_time=resample_time,
+        dropout_rate=dropout_rate
     )
 
     plot_loss_curves(
@@ -1096,6 +1120,10 @@ def run_lstm_model(
         "X_test": X_test,
         "model_features": model_features,
         "output_seq_length": output_seq_length,
+        "resample_time": resample_time,
+        "dropout_rate": dropout_rate,
+        "learning_rate": learning_rate,
+        "hidden_size": hidden_size,
 
         # ADD THESE for Deep Ensemble
         "train_loader": train_loader,

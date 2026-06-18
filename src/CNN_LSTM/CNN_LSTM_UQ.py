@@ -106,6 +106,24 @@ def plot_mc_dropout_uncertainty(
         lower_bound = lower_bound[:max_plot_points]
         upper_bound = upper_bound[:max_plot_points]
 
+    interval_width = upper_bound - lower_bound
+    coverage = np.mean(
+        (actual_values >= lower_bound) & (actual_values <= upper_bound)
+    )
+
+    print(f"\nMC Dropout bounds for forecast step {forecast_step}:")
+    print("Lower bound shape:", lower_bound.shape)
+    print("Upper bound shape:", upper_bound.shape)
+    print("Lower bound first 5:", lower_bound[:5])
+    print("Upper bound first 5:", upper_bound[:5])
+    print(
+        "Interval width mean/min/max:",
+        np.mean(interval_width),
+        np.min(interval_width),
+        np.max(interval_width)
+    )
+    print("Empirical coverage:", coverage)
+
     fig, ax = plt.subplots(figsize=(11, 4))
 
     ax.plot(

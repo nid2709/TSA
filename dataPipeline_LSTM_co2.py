@@ -4,7 +4,7 @@ import os
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 from src.LSTM.dataLoad import load_prepare_data, plot_time_series, plot_heatmap, plot_pca_analysis
-from src.LSTM.LSTM_co2 import run_lstm_model
+from src.LSTM.LSTM_co2 import run_lstm_model, DEFAULT_OUTPUT_SEQ_LENGTH
 from src.LSTM.LSTM_UQ import run_mc_dropout_uq
 from src.LSTM.LSTM_DeepEnsemble import run_deep_ensemble_uq
 from src.LSTM.LSTM_explainability import run_shap_experiment
@@ -22,9 +22,9 @@ def run_pipeline():
     # plot_heatmap(df)
     # plot_pca_analysis(df)
 
-    # Train and evaluate all LSTM target features. Change this value to 12 to
-    # show horizon 1 and horizon 12 prediction graphs for each feature.
-    output_seq_length = 12
+    # Train and evaluate all LSTM target features with the default output length
+    # from LSTM_co2.py.
+    output_seq_length = DEFAULT_OUTPUT_SEQ_LENGTH
     lstm_results = run_lstm_model(
         df,
         output_seq_length=output_seq_length

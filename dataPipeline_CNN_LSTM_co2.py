@@ -10,7 +10,10 @@ from src.CNN_LSTM.dataLoad import (
     plot_pca_analysis
 )
 
-from src.CNN_LSTM.CNN_LSTM_co2 import run_cnn_lstm_model
+from src.CNN_LSTM.CNN_LSTM_co2 import (
+    run_cnn_lstm_model,
+    DEFAULT_OUTPUT_SEQ_LENGTH
+)
 from src.CNN_LSTM.CNN_LSTM_UQ import run_mc_dropout_uq
 from src.CNN_LSTM.CNN_LSTM_DeepEnsemble import run_deep_ensemble_uq
 from src.CNN_LSTM.CNN_LSTM_explainability import run_shap_experiment
@@ -30,7 +33,7 @@ def run_pipeline():
 
     # Train CNN-LSTM and keep returned values needed for Explainability techniques.
     # CNN_LSTM_explainability.py uses model, X_train, X_test, actuals, and features.
-    output_seq_length = 12
+    output_seq_length = DEFAULT_OUTPUT_SEQ_LENGTH
     cnn_results = run_cnn_lstm_model(
         df,
         output_seq_length=output_seq_length

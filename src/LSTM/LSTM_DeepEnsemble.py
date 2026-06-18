@@ -33,11 +33,16 @@ def plot_deep_ensemble_uncertainty(
     mean_predictions,
     std_predictions,
     forecast_step=1,
-    max_plot_points=500,
+    max_plot_points=1500,
     target_label="CO2",
     results_dir=None
 ):
     step_index = forecast_step - 1
+
+    if forecast_step < 1 or forecast_step > actuals.shape[1]:
+        raise ValueError(
+            f"forecast_step must be between 1 and {actuals.shape[1]}"
+        )
 
     x_values = np.arange(len(actuals))
 
@@ -48,12 +53,30 @@ def plot_deep_ensemble_uncertainty(
     lower_bound = mean_values - 1.96 * std_values
     upper_bound = mean_values + 1.96 * std_values
 
-    if len(x_values) > max_plot_points:
+    if max_plot_points is not None and len(x_values) > max_plot_points:
         x_values = x_values[:max_plot_points]
         actual_values = actual_values[:max_plot_points]
         mean_values = mean_values[:max_plot_points]
         lower_bound = lower_bound[:max_plot_points]
         upper_bound = upper_bound[:max_plot_points]
+
+    interval_width = upper_bound - lower_bound
+    coverage = np.mean(
+        (actual_values >= lower_bound) & (actual_values <= upper_bound)
+    )
+
+    print(f"\nDeep Ensemble bounds for forecast step {forecast_step}:")
+    print("Lower bound shape:", lower_bound.shape)
+    print("Upper bound shape:", upper_bound.shape)
+    print("Lower bound first 5:", lower_bound[:5])
+    print("Upper bound first 5:", upper_bound[:5])
+    print(
+        "Interval width mean/min/max:",
+        np.mean(interval_width),
+        np.min(interval_width),
+        np.max(interval_width)
+    )
+    print("Empirical coverage:", coverage)
 
     fig, ax = plt.subplots(figsize=(11, 4))
 

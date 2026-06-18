@@ -262,13 +262,39 @@ def run_pfi_analysis(
     # Plot PFI feature importance for CNN-LSTM
     sorted_features = [item[0] for item in pfi_results]
     sorted_importance = [item[1] for item in pfi_results]
+    colors = [
+        "tab:red" if importance < 0 else "tab:blue"
+        for importance in sorted_importance
+    ]
 
-    plt.figure(figsize=(10, 6))
-    plt.barh(sorted_features, sorted_importance)
-    plt.xlabel("RMSE Increase After Permutation")
-    plt.ylabel("Feature")
-    plt.title("Permutation Feature Importance for CNN-LSTM")
-    plt.gca().invert_yaxis()
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.barh(sorted_features, sorted_importance, color=colors)
+    ax.axvline(0, color="black", linewidth=1)
+    ax.set_xlabel("RMSE Increase After Permutation")
+    ax.set_ylabel("Feature")
+    ax.set_title("Permutation Feature Importance for CNN-LSTM")
+    ax.invert_yaxis()
+
+    min_importance = min(sorted_importance)
+    max_importance = max(sorted_importance)
+    x_min = min(0, min_importance)
+    x_max = max(0, max_importance)
+    x_padding = max((x_max - x_min) * 0.05, 1e-6)
+    ax.set_xlim(x_min - x_padding, x_max + x_padding)
+
+    negative_features = [
+        (feature, importance)
+        for feature, importance in pfi_results
+        if importance < 0
+    ]
+
+    if negative_features:
+        print("\nNegative PFI values found:")
+        for feature, importance in negative_features:
+            print(f"{feature:25s} {importance:.8f}")
+    else:
+        print("\nNo negative PFI values found in this run.")
+
     plt.tight_layout()
 
     if results_dir is None:
@@ -281,7 +307,7 @@ def run_pfi_analysis(
         "pfi_feature_importance_cnn_lstm.png"
     )
     plt.savefig(save_path, dpi=300)
-    #print("Saved plot:", save_path)
+    # print("Saved plot:", save_path)
 
     plt.show()
     plt.close()
@@ -296,7 +322,7 @@ def run_integrated_gradients_analysis(
     feature_names,
     forecast_step=1,
     num_samples=100,
-    max_timesteps=500,
+    max_timesteps=None,
     results_dir=None
 ):
 

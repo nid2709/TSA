@@ -41,11 +41,13 @@ TARGET = 'scd41_co2'
 STATION_COLUMN = 'station_id'
 
 DEFAULT_INPUT_SEQ_LENGTH = 144
-DEFAULT_OUTPUT_SEQ_LENGTH = 48
+DEFAULT_OUTPUT_SEQ_LENGTH = 24
 DEFAULT_BATCH_SIZE = 32
-DEFAULT_EPOCHS = 10
-DEFAULT_LEARNING_RATE = 0.00001
+DEFAULT_EPOCHS = 30
+DEFAULT_LEARNING_RATE = 0.0005
 DEFAULT_HIDDEN_SIZE = 128
+DEFAULT_RESAMPLE_TIME = '30min'
+DEFAULT_DROPOUT_RATE = 0.1
 
 
 def get_target_label(target_column):
@@ -71,7 +73,9 @@ def get_cnn_lstm_results_dir(
     batch_size=DEFAULT_BATCH_SIZE,
     epochs=DEFAULT_EPOCHS,
     learning_rate=DEFAULT_LEARNING_RATE,
-    hidden_size=DEFAULT_HIDDEN_SIZE
+    hidden_size=DEFAULT_HIDDEN_SIZE,
+    resample_time=DEFAULT_RESAMPLE_TIME,
+    dropout_rate=DEFAULT_DROPOUT_RATE
 ):
     project_root = os.path.abspath(
         os.path.join(os.path.dirname(__file__), "..", "..")
@@ -84,7 +88,9 @@ def get_cnn_lstm_results_dir(
         f"BS{batch_size}_"
         f"EPOCH{epochs}_"
         f"LR{learning_rate}_"
-        f"HS{hidden_size}"
+        f"HS{hidden_size}_"
+        f"RS{resample_time}_"
+        f"DR{dropout_rate}"
     )
 
     return os.path.join(project_root, folder_name)
@@ -107,7 +113,7 @@ def add_time_features(df):
     return df
 
 
-def preprocess_data(df):
+def preprocess_data(df, resample_time=DEFAULT_RESAMPLE_TIME):
     df = df.copy()
 
     print("\n========== PREPROCESSING ==========")
@@ -127,13 +133,13 @@ def preprocess_data(df):
 
     df = (
         df.groupby(STATION_COLUMN)
-        .resample('15min')
+        .resample(resample_time)
         .mean()
         .drop(columns=STATION_COLUMN, errors='ignore')
         .reset_index(level=0)
     )
 
-    print("\nAfter resampling:", df.shape)
+    print(f"\nAfter {resample_time} resampling:", df.shape)
 
     return df[BASE_FEATURES + [STATION_COLUMN]]
 
@@ -387,9 +393,10 @@ def prepare_cnn_lstm_data(
     df,
     input_seq_length=DEFAULT_INPUT_SEQ_LENGTH,
     output_seq_length=DEFAULT_OUTPUT_SEQ_LENGTH,
-    batch_size=DEFAULT_BATCH_SIZE
+    batch_size=DEFAULT_BATCH_SIZE,
+    resample_time=DEFAULT_RESAMPLE_TIME
 ):
-    df = preprocess_data(df)
+    df = preprocess_data(df, resample_time=resample_time)
 
     station_ids = sorted(df[STATION_COLUMN].unique().tolist())
 
@@ -450,7 +457,7 @@ class CNNLSTMModel(nn.Module):
         output_seq_length=DEFAULT_OUTPUT_SEQ_LENGTH,
         hidden_size=DEFAULT_HIDDEN_SIZE,
         num_layers=2,
-        dropout=0.1
+        dropout=DEFAULT_DROPOUT_RATE
     ):
         super().__init__()
         self.conv1 = nn.Conv1d(input_size, 128, kernel_size=5, padding=2)
@@ -686,6 +693,10 @@ def run_cnn_lstm_model(
     input_seq_length=DEFAULT_INPUT_SEQ_LENGTH,
     output_seq_length=DEFAULT_OUTPUT_SEQ_LENGTH,
     batch_size=DEFAULT_BATCH_SIZE,
+    learning_rate=DEFAULT_LEARNING_RATE,
+    hidden_size=DEFAULT_HIDDEN_SIZE,
+    dropout_rate=DEFAULT_DROPOUT_RATE,
+    resample_time=DEFAULT_RESAMPLE_TIME,
     show_prediction_plot=True
 ):
     (
@@ -700,22 +711,35 @@ def run_cnn_lstm_model(
         df,
         input_seq_length=input_seq_length,
         output_seq_length=output_seq_length,
-        batch_size=batch_size
+        batch_size=batch_size,
+        resample_time=resample_time
     )
 
     model = CNNLSTMModel(
         input_size=input_size,
-        output_seq_length=output_seq_length
+        output_seq_length=output_seq_length,
+        hidden_size=hidden_size,
+        dropout=dropout_rate
     )
 
-    model, train_losses, val_losses = train_model(model, train_loader, val_loader, epochs)
+    model, train_losses, val_losses = train_model(
+        model,
+        train_loader,
+        val_loader,
+        epochs,
+        learning_rate=learning_rate
+    )
     predictions, actuals, mse, mae, rmse, r2 = evaluate_model(model, test_loader)
 
     results_dir = get_cnn_lstm_results_dir(
         input_seq_length=input_seq_length,
         output_seq_length=output_seq_length,
         batch_size=batch_size,
-        epochs=epochs
+        epochs=epochs,
+        learning_rate=learning_rate,
+        hidden_size=hidden_size,
+        resample_time=resample_time,
+        dropout_rate=dropout_rate
     )
 
     plot_loss_curves(
@@ -748,6 +772,10 @@ def run_cnn_lstm_model(
         "X_test": X_test,
         "model_features": model_features,
         "output_seq_length": output_seq_length,
+        "resample_time": resample_time,
+        "dropout_rate": dropout_rate,
+        "learning_rate": learning_rate,
+        "hidden_size": hidden_size,
 
         # ADD THESE for Deep Ensemble
         "train_loader": train_loader,
