@@ -75,7 +75,7 @@ def plot_mc_dropout_uncertainty(
     mean_predictions,
     std_predictions,
     forecast_step=1,
-    max_plot_points=None,
+    max_plot_points=1000,
     target_label="CO2",
     results_dir=None
 ):
@@ -174,7 +174,7 @@ def plot_mc_dropout_uncertainty(
     plt.savefig(save_path, dpi=300)
     #print("Saved plot:", save_path)
 
-    plt.show()
+    #plt.show()
     plt.close()
 
 

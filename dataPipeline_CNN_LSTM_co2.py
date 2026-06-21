@@ -40,6 +40,13 @@ def run_pipeline():
     )
 
     print(cnn_results.keys()) # to check SHAP / Explainability
+    print("\n========== CNN-LSTM VS CNN-LSTM + SCATTERING TAGS ==========")
+    print("Use scattering:", cnn_results["use_scattering"])
+    print("Scattering J:", cnn_results["scattering_j"])
+    print("Scattering Q:", cnn_results["scattering_q"])
+    print("Scattering features:", cnn_results["n_scattering_features"])
+    print("Final input feature count:", cnn_results["input_size"])
+    print("Results directory:", cnn_results["results_dir"])
 
     # Explainability techniques - saves SHAP, PFI and Integrated Gradients images
     # using the already trained CNN-LSTM model.
@@ -78,6 +85,8 @@ def run_pipeline():
         uq_results,
         deep_ensemble_results
     )
+
+    #return cnn_results
 
 
 if __name__ == "__main__":

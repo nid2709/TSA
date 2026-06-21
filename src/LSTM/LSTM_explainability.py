@@ -123,7 +123,7 @@ def run_shap_experiment(results=None):
     plt.savefig(save_path, dpi=300)
     print("Saved plot:", save_path)
 
-    plt.show()
+    #plt.show()
     plt.close()
 
     # for PFI
@@ -286,7 +286,7 @@ def run_pfi_analysis(
     plt.savefig(save_path, dpi=300)
     print("Saved plot:", save_path)
 
-    plt.show()
+    #plt.show()
     plt.close()
 
     return pfi_results
@@ -398,7 +398,7 @@ def run_integrated_gradients_analysis(
     plt.savefig(save_path, dpi=300)
     print("Saved plot:", save_path)
 
-    plt.show()
+    #plt.show()
     plt.close()
 
     # Mean absolute attribution per timestep
@@ -428,7 +428,7 @@ def run_integrated_gradients_analysis(
     plt.savefig(save_path, dpi=300)
     print("Saved plot:", save_path)
 
-    plt.show()
+    #plt.show()
     plt.close()
 
     return attributions, feature_importance, timestep_importance

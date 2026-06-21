@@ -116,7 +116,7 @@ def plot_deep_ensemble_uncertainty(
     plt.savefig(save_path, dpi=300)
     print("Saved plot:", save_path)
 
-    plt.show()
+    #plt.show()
     plt.close()
 
 

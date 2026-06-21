@@ -147,7 +147,7 @@ def run_shap_experiment(results=None):
     plt.savefig(save_path, dpi=300)
     #print("Saved plot:", save_path)
 
-    plt.show()
+    #plt.show()
     plt.close()
 
     # for PFI
@@ -155,8 +155,8 @@ def run_shap_experiment(results=None):
 
     pfi_results = run_pfi_analysis(
         model=model,
-        X_test=X_test[:500],
-        actuals=actuals[:500],
+        X_test=X_test[:1000],
+        actuals=actuals[:1000],
         feature_names=feature_names,
         results_dir=results_dir
     )
@@ -309,7 +309,7 @@ def run_pfi_analysis(
     plt.savefig(save_path, dpi=300)
     # print("Saved plot:", save_path)
 
-    plt.show()
+    #plt.show()
     plt.close()
 
     return pfi_results
@@ -322,7 +322,7 @@ def run_integrated_gradients_analysis(
     feature_names,
     forecast_step=1,
     num_samples=100,
-    max_timesteps=None,
+    max_plot_points=1000,
     results_dir=None
 ):
 
@@ -421,12 +421,12 @@ def run_integrated_gradients_analysis(
     plt.savefig(save_path, dpi=300)
     #print("Saved plot:", save_path)
 
-    plt.show()
+    #plt.show()
     plt.close()
 
     # Mean absolute attribution per timestep for CNN-LSTM
     timestep_importance = np.abs(attributions).mean(axis=(0, 2))
-    timestep_importance_plot = timestep_importance[:max_timesteps]
+    timestep_importance_plot = timestep_importance[:max_plot_points]
 
     plt.figure(figsize=(8, 4))
     plt.plot(
@@ -451,7 +451,7 @@ def run_integrated_gradients_analysis(
     plt.savefig(save_path, dpi=300)
     #print("Saved plot:", save_path)
 
-    plt.show()
+    #plt.show()
     plt.close()
 
     return attributions, feature_importance, timestep_importance

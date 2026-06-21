@@ -30,6 +30,15 @@ def run_pipeline():
         output_seq_length=output_seq_length
     )
 
+    print(lstm_results.keys()) # to check SHAP / Explainability
+    print("\n========== LSTM VS LSTM + SCATTERING TAGS ==========")
+    print("Use scattering:", lstm_results["use_scattering"])
+    print("Scattering J:", lstm_results["scattering_j"])
+    print("Scattering Q:", lstm_results["scattering_q"])
+    print("Scattering features:", lstm_results["n_scattering_features"])
+    print("Final input feature count:", lstm_results["input_size"])
+    print("Results directory:", lstm_results["results_dir"])
+
     # Explainability techniques - saves SHAP, PFI and Integrated Gradients images
     # using the already trained LSTM model.
     explainability_results = run_shap_experiment(
@@ -54,8 +63,6 @@ def run_pipeline():
         n_models=3,
         results_dir=lstm_results["results_dir"]
     )
-
-    print(lstm_results.keys()) # to check SHAP
 
     return (
         lstm_results,

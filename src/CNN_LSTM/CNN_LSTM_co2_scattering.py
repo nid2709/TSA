@@ -55,12 +55,16 @@ DEFAULT_RESAMPLE_TIME = '15min'
 DEFAULT_DROPOUT_RATE = 0.15
 DEFAULT_WEIGHT_DECAY = 1e-4
 DEFAULT_NUM_LAYERS = 1
-conv_channels = 128
 
-DEFAULT_USE_SCATTERING = True
+# Scattering Wavelet settings for Question 3.
+# These features are computed from each input CO2 window and appended as
+# static features repeated across the timesteps of that sample.
+DEFAULT_USE_SCATTERING = False
 DEFAULT_SCATTERING_J = 4
 DEFAULT_SCATTERING_Q = 8
 DEFAULT_N_SCATTERING_FEATURES = 8
+
+conv_channels = 128
 
 
 def get_target_label(target_column):
@@ -92,8 +96,6 @@ def get_cnn_lstm_results_dir(
     weight_decay=DEFAULT_WEIGHT_DECAY,
     num_layers=DEFAULT_NUM_LAYERS,
     use_scattering=DEFAULT_USE_SCATTERING,
-    scattering_j=DEFAULT_SCATTERING_J,
-    scattering_q=DEFAULT_SCATTERING_Q,
     n_scattering_features=DEFAULT_N_SCATTERING_FEATURES
 ):
     project_root = os.path.abspath(
@@ -113,8 +115,6 @@ def get_cnn_lstm_results_dir(
         f"WD{weight_decay}_"
         f"NL{num_layers}_"
         f"SWT{int(use_scattering)}_"
-        f"SWJ{scattering_j if use_scattering else 0}_"
-        f"SWQ{scattering_q if use_scattering else 0}_"
         f"SWF{n_scattering_features if use_scattering else 0}"
     )
 
@@ -347,6 +347,7 @@ def scale_data(train_df, val_df, test_df, model_features):
     return train_df, val_df, test_df
 
 
+
 def get_scattering_feature_names(n_scattering_features):
     return [
         f"scatter_co2_{i + 1}"
@@ -377,7 +378,14 @@ def compute_static_scattering_features(
     scattering_transform,
     n_scattering_features=DEFAULT_N_SCATTERING_FEATURES
 ):
+    """
+    Convert one CO2 input window into a compact static scattering vector.
+    The scattering output has several coefficients over a reduced time axis.
+    We average over that reduced time axis, then keep only the first selected
+    coefficients to avoid making the CNN-LSTM input too large.
+    """
     signal_window = np.asarray(signal_window, dtype=np.float32)
+
     scattering_coefficients = scattering_transform(signal_window)
     scattering_coefficients = np.asarray(scattering_coefficients)
 
@@ -431,21 +439,25 @@ def create_sequences(
             if use_scattering:
                 if scattering_transform is None:
                     raise ValueError(
-                        "scattering_transform must be provided when "
-                        "use_scattering=True"
+                        "scattering_transform must be provided when use_scattering=True"
                     )
 
                 co2_window = input_window[:, target_index]
+
                 static_scattering_vector = compute_static_scattering_features(
                     co2_window,
                     scattering_transform,
                     n_scattering_features=n_scattering_features
                 )
+
+                # Repeat static scattering coefficients over all timesteps so
+                # the CNN-LSTM can receive them together with dynamic features.
                 repeated_scattering = np.repeat(
                     static_scattering_vector.reshape(1, -1),
                     input_seq_length,
                     axis=0
                 )
+
                 input_window = np.concatenate(
                     [input_window, repeated_scattering],
                     axis=1
@@ -537,16 +549,12 @@ def prepare_cnn_lstm_data(
     scattering_transform = None
     scattering_feature_names = []
 
-    print("\n========== FEATURE CONFIGURATION ==========")
-    print("Base dynamic feature count:", len(model_features))
-    print("Use scattering features:", use_scattering)
-
     if use_scattering:
-        print("\n========== SCATTERING WAVELET FEATURES ==========")
+        print("\n========== SCATTERING WAVELET FEATURES =========")
         print("Scattering source signal: scaled scd41_co2 input window")
-        print("Scattering J:", scattering_j)
-        print("Scattering Q:", scattering_q)
-        print("Static scattering features:", n_scattering_features)
+        print("J:", scattering_j)
+        print("Q:", scattering_q)
+        print("Number of static scattering features:", n_scattering_features)
 
         scattering_transform = build_scattering_transform(
             input_seq_length=input_seq_length,
@@ -556,8 +564,6 @@ def prepare_cnn_lstm_data(
         scattering_feature_names = get_scattering_feature_names(
             n_scattering_features
         )
-    else:
-        print("Static scattering features: 0")
 
     X_train, y_train = create_sequences(
         train_df,
@@ -593,9 +599,6 @@ def prepare_cnn_lstm_data(
     print("X_train:", X_train.shape, "y_train:", y_train.shape)
     print("X_val:", X_val.shape, "y_val:", y_val.shape)
     print("X_test:", X_test.shape, "y_test:", y_test.shape)
-    print("Final model feature count:", len(model_features))
-    if scattering_feature_names:
-        print("Scattering feature names:", scattering_feature_names)
 
     train_loader = create_loader(X_train, y_train, batch_size, shuffle=True)
     val_loader = create_loader(X_val, y_val, batch_size)
@@ -813,7 +816,7 @@ def plot_loss_curves(train_losses, val_losses, results_dir=None):
         plt.savefig(save_path, dpi=300)
         #print("Saved plot:", save_path)
 
-    #plt.show()
+    plt.show()
     plt.close()
 
 
@@ -858,7 +861,7 @@ def plot_predictions(
         plt.savefig(save_path, dpi=300)
         #print("Saved plot:", save_path)
 
-    #plt.show()
+    plt.show()
     plt.close()
 
 
@@ -901,24 +904,6 @@ def run_cnn_lstm_model(
     scattering_q=DEFAULT_SCATTERING_Q,
     n_scattering_features=DEFAULT_N_SCATTERING_FEATURES
 ):
-    print("\n========== CNN-LSTM RUN CONFIGURATION ==========")
-    print("Input sequence length:", input_seq_length)
-    print("Output sequence length:", output_seq_length)
-    print("Batch size:", batch_size)
-    print("Epochs:", epochs)
-    print("Learning rate:", learning_rate)
-    print("Hidden size:", hidden_size)
-    print("Resample time:", resample_time)
-    print("Dropout rate:", dropout_rate)
-    print("Weight decay:", weight_decay)
-    print("Number of LSTM layers:", num_layers)
-    print("Convolution channels:", conv_channels)
-    print("Use scattering:", use_scattering)
-    if use_scattering:
-        print("Scattering J:", scattering_j)
-        print("Scattering Q:", scattering_q)
-        print("Number of scattering features:", n_scattering_features)
-
     (
         train_loader,
         val_loader,
@@ -969,8 +954,6 @@ def run_cnn_lstm_model(
         weight_decay=weight_decay,
         num_layers=num_layers,
         use_scattering=use_scattering,
-        scattering_j=scattering_j,
-        scattering_q=scattering_q,
         n_scattering_features=n_scattering_features
     )
 

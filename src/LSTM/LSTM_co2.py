@@ -20,6 +20,11 @@ from torch.utils.data import DataLoader, TensorDataset
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.preprocessing import MinMaxScaler
 
+try:
+    from kymatio.numpy import Scattering1D
+except ImportError:
+    Scattering1D = None
+
 
 BASE_FEATURES = [
     'ens160_aqi',
@@ -52,6 +57,13 @@ DEFAULT_LEARNING_RATE = 0.00001
 DEFAULT_HIDDEN_SIZE = 64
 DEFAULT_RESAMPLE_TIME = '30min'
 DEFAULT_DROPOUT_RATE = 0.15
+DEFAULT_WEIGHT_DECAY = 1e-4
+DEFAULT_NUM_LAYERS = 2
+
+DEFAULT_USE_SCATTERING = False
+DEFAULT_SCATTERING_J = 4
+DEFAULT_SCATTERING_Q = 8
+DEFAULT_N_SCATTERING_FEATURES = 8
 
 TARGET_LABELS = {
     'scd41_co2': 'CO2',
@@ -79,7 +91,13 @@ def get_lstm_results_dir(
     learning_rate=DEFAULT_LEARNING_RATE,
     hidden_size=DEFAULT_HIDDEN_SIZE,
     resample_time=DEFAULT_RESAMPLE_TIME,
-    dropout_rate=DEFAULT_DROPOUT_RATE
+    dropout_rate=DEFAULT_DROPOUT_RATE,
+    weight_decay=DEFAULT_WEIGHT_DECAY,
+    num_layers=DEFAULT_NUM_LAYERS,
+    use_scattering=DEFAULT_USE_SCATTERING,
+    scattering_j=DEFAULT_SCATTERING_J,
+    scattering_q=DEFAULT_SCATTERING_Q,
+    n_scattering_features=DEFAULT_N_SCATTERING_FEATURES
 ):
     project_root = os.path.abspath(
         os.path.join(os.path.dirname(__file__), "..", "..")
@@ -94,7 +112,13 @@ def get_lstm_results_dir(
         f"LR{learning_rate}_"
         f"HS{hidden_size}_"
         f"RS{resample_time}_"
-        f"DR{dropout_rate}"
+        f"DR{dropout_rate}_"
+        f"WD{weight_decay}_"
+        f"NL{num_layers}_"
+        f"SWT{int(use_scattering)}_"
+        f"SWJ{scattering_j if use_scattering else 0}_"
+        f"SWQ{scattering_q if use_scattering else 0}_"
+        f"SWF{n_scattering_features if use_scattering else 0}"
     )
 
     return os.path.join(project_root, folder_name)
@@ -463,12 +487,69 @@ def scale_data(
     return train_df, val_df, test_df
 
 
+def get_scattering_feature_names(
+    n_scattering_features,
+    target_column=DEFAULT_TARGET
+):
+    return [
+        f"scatter_{target_column}_{i + 1}"
+        for i in range(n_scattering_features)
+    ]
+
+
+def build_scattering_transform(
+    input_seq_length,
+    scattering_j=DEFAULT_SCATTERING_J,
+    scattering_q=DEFAULT_SCATTERING_Q
+):
+    if Scattering1D is None:
+        raise ImportError(
+            "Kymatio is required for scattering wavelet features. "
+            "Install it with: pip install kymatio"
+        )
+
+    return Scattering1D(
+        J=scattering_j,
+        shape=input_seq_length,
+        Q=scattering_q
+    )
+
+
+def compute_static_scattering_features(
+    signal_window,
+    scattering_transform,
+    n_scattering_features=DEFAULT_N_SCATTERING_FEATURES
+):
+    signal_window = np.asarray(signal_window, dtype=np.float32)
+    scattering_coefficients = scattering_transform(signal_window)
+    scattering_coefficients = np.asarray(scattering_coefficients)
+
+    if scattering_coefficients.ndim == 2:
+        static_vector = scattering_coefficients.mean(axis=1)
+    else:
+        static_vector = scattering_coefficients.reshape(-1)
+
+    static_vector = static_vector[:n_scattering_features]
+
+    if len(static_vector) < n_scattering_features:
+        static_vector = np.pad(
+            static_vector,
+            (0, n_scattering_features - len(static_vector)),
+            mode="constant"
+        )
+
+    return static_vector.astype(np.float32)
+
+
 def create_sequences(
     data,
     model_features,
     input_seq_length=DEFAULT_INPUT_SEQ_LENGTH,
     output_seq_length=DEFAULT_OUTPUT_SEQ_LENGTH,
-    target_column=DEFAULT_TARGET
+    target_column=DEFAULT_TARGET,
+    use_scattering=DEFAULT_USE_SCATTERING,
+    scattering_transform=None,
+    n_scattering_features=DEFAULT_N_SCATTERING_FEATURES
 ):
 
     X, y = [], []
@@ -521,12 +602,32 @@ def create_sequences(
             - output_seq_length
         ):
 
-            # Input sequence
-            X.append(
-                values[
-                    i:i + input_seq_length
-                ]
-            )
+            input_window = values[i:i + input_seq_length]
+
+            if use_scattering:
+                if scattering_transform is None:
+                    raise ValueError(
+                        "scattering_transform must be provided when "
+                        "use_scattering=True"
+                    )
+
+                target_window = input_window[:, target_index]
+                static_scattering_vector = compute_static_scattering_features(
+                    target_window,
+                    scattering_transform,
+                    n_scattering_features=n_scattering_features
+                )
+                repeated_scattering = np.repeat(
+                    static_scattering_vector.reshape(1, -1),
+                    input_seq_length,
+                    axis=0
+                )
+                input_window = np.concatenate(
+                    [input_window, repeated_scattering],
+                    axis=1
+                )
+
+            X.append(input_window)
 
             # Multi-step output sequence
             y.append(
@@ -585,7 +686,11 @@ def prepare_lstm_data(
     output_seq_length=DEFAULT_OUTPUT_SEQ_LENGTH,
     batch_size=DEFAULT_BATCH_SIZE,
     target_column=DEFAULT_TARGET,
-    resample_time=DEFAULT_RESAMPLE_TIME
+    resample_time=DEFAULT_RESAMPLE_TIME,
+    use_scattering=DEFAULT_USE_SCATTERING,
+    scattering_j=DEFAULT_SCATTERING_J,
+    scattering_q=DEFAULT_SCATTERING_Q,
+    n_scattering_features=DEFAULT_N_SCATTERING_FEATURES
 ):
 
     feature_columns = get_feature_columns(target_column)
@@ -639,12 +744,41 @@ def prepare_lstm_data(
         model_features
     )
 
+    scattering_transform = None
+    scattering_feature_names = []
+
+    print("\n========== FEATURE CONFIGURATION ==========")
+    print("Base dynamic feature count:", len(model_features))
+    print("Use scattering features:", use_scattering)
+
+    if use_scattering:
+        print("\n========== SCATTERING WAVELET FEATURES ==========")
+        print(f"Scattering source signal: scaled {target_column} input window")
+        print("Scattering J:", scattering_j)
+        print("Scattering Q:", scattering_q)
+        print("Static scattering features:", n_scattering_features)
+
+        scattering_transform = build_scattering_transform(
+            input_seq_length=input_seq_length,
+            scattering_j=scattering_j,
+            scattering_q=scattering_q
+        )
+        scattering_feature_names = get_scattering_feature_names(
+            n_scattering_features,
+            target_column=target_column
+        )
+    else:
+        print("Static scattering features: 0")
+
     X_train, y_train = create_sequences(
         train_df,
         model_features,
         input_seq_length,
         output_seq_length,
-        target_column
+        target_column,
+        use_scattering=use_scattering,
+        scattering_transform=scattering_transform,
+        n_scattering_features=n_scattering_features
     )
 
     X_val, y_val = create_sequences(
@@ -652,7 +786,10 @@ def prepare_lstm_data(
         model_features,
         input_seq_length,
         output_seq_length,
-        target_column
+        target_column,
+        use_scattering=use_scattering,
+        scattering_transform=scattering_transform,
+        n_scattering_features=n_scattering_features
     )
 
     X_test, y_test = create_sequences(
@@ -660,14 +797,21 @@ def prepare_lstm_data(
         model_features,
         input_seq_length,
         output_seq_length,
-        target_column
+        target_column,
+        use_scattering=use_scattering,
+        scattering_transform=scattering_transform,
+        n_scattering_features=n_scattering_features
     )
+
+    model_features = model_features + scattering_feature_names
 
     print("\n========== FINAL DATA SHAPES ==========")
 
     print("X_train:", X_train.shape, "y_train:", y_train.shape)
     print("X_val:", X_val.shape, "y_val:", y_val.shape)
     print("X_test:", X_test.shape, "y_test:", y_test.shape)
+    print("Final input feature count:", X_train.shape[2])
+    print("Final model features:", model_features)
 
     train_loader = create_loader(
         X_train,
@@ -707,7 +851,7 @@ class LSTMModel(nn.Module):
         input_size,
         output_seq_length=DEFAULT_OUTPUT_SEQ_LENGTH,
         hidden_size=DEFAULT_HIDDEN_SIZE,
-        num_layers=2,
+        num_layers=DEFAULT_NUM_LAYERS,
         dropout_rate=DEFAULT_DROPOUT_RATE
     ):
         super().__init__()
@@ -772,6 +916,7 @@ def train_model(
     epochs=DEFAULT_EPOCHS,
     patience=10,
     learning_rate=DEFAULT_LEARNING_RATE,
+    weight_decay=DEFAULT_WEIGHT_DECAY,
     min_delta=1e-6
 ):
 
@@ -782,7 +927,7 @@ def train_model(
     optimizer = torch.optim.Adam(
         model.parameters(),
         lr=learning_rate,
-        weight_decay=1e-4
+        weight_decay=weight_decay
     )
 
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -927,7 +1072,7 @@ def plot_loss_curves(
         plt.savefig(save_path, dpi=300)
         print("Saved plot:", save_path)
 
-    plt.show()
+    #plt.show()
     plt.close()
 
 
@@ -996,7 +1141,7 @@ def plot_predictions(
         plt.savefig(save_path, dpi=300)
         print("Saved plot:", save_path)
 
-    plt.show()
+    #plt.show()
     plt.close()
 
 
@@ -1037,9 +1182,32 @@ def run_lstm_model(
     learning_rate=DEFAULT_LEARNING_RATE,
     hidden_size=DEFAULT_HIDDEN_SIZE,
     dropout_rate=DEFAULT_DROPOUT_RATE,
+    weight_decay=DEFAULT_WEIGHT_DECAY,
+    num_layers=DEFAULT_NUM_LAYERS,
     resample_time=DEFAULT_RESAMPLE_TIME,
-    show_prediction_plot=True
+    show_prediction_plot=True,
+    use_scattering=DEFAULT_USE_SCATTERING,
+    scattering_j=DEFAULT_SCATTERING_J,
+    scattering_q=DEFAULT_SCATTERING_Q,
+    n_scattering_features=DEFAULT_N_SCATTERING_FEATURES
 ):
+    print("\n========== LSTM RUN CONFIGURATION ==========")
+    print("Input sequence length:", input_seq_length)
+    print("Output sequence length:", output_seq_length)
+    print("Batch size:", batch_size)
+    print("Epochs:", epochs)
+    print("Learning rate:", learning_rate)
+    print("Hidden size:", hidden_size)
+    print("Resample time:", resample_time)
+    print("Dropout rate:", dropout_rate)
+    print("Weight decay:", weight_decay)
+    print("Number of LSTM layers:", num_layers)
+    print("Target column:", target_column)
+    print("Use scattering:", use_scattering)
+    if use_scattering:
+        print("Scattering J:", scattering_j)
+        print("Scattering Q:", scattering_q)
+        print("Number of scattering features:", n_scattering_features)
 
     (
         train_loader,
@@ -1055,13 +1223,18 @@ def run_lstm_model(
         output_seq_length,
         batch_size,
         target_column=target_column,
-        resample_time=resample_time
+        resample_time=resample_time,
+        use_scattering=use_scattering,
+        scattering_j=scattering_j,
+        scattering_q=scattering_q,
+        n_scattering_features=n_scattering_features
     )
 
     model = LSTMModel(
         input_size=input_size,
         output_seq_length=output_seq_length,
         hidden_size=hidden_size,
+        num_layers=num_layers,
         dropout_rate=dropout_rate
     )
 
@@ -1070,7 +1243,8 @@ def run_lstm_model(
         train_loader,
         val_loader,
         epochs,
-        learning_rate=learning_rate
+        learning_rate=learning_rate,
+        weight_decay=weight_decay
     )
 
     predictions, actuals, mse, mae, rmse, r2 = evaluate_model(
@@ -1086,7 +1260,13 @@ def run_lstm_model(
         learning_rate=learning_rate,
         hidden_size=hidden_size,
         resample_time=resample_time,
-        dropout_rate=dropout_rate
+        dropout_rate=dropout_rate,
+        weight_decay=weight_decay,
+        num_layers=num_layers,
+        use_scattering=use_scattering,
+        scattering_j=scattering_j,
+        scattering_q=scattering_q,
+        n_scattering_features=n_scattering_features
     )
 
     plot_loss_curves(
@@ -1124,6 +1304,12 @@ def run_lstm_model(
         "dropout_rate": dropout_rate,
         "learning_rate": learning_rate,
         "hidden_size": hidden_size,
+        "weight_decay": weight_decay,
+        "num_layers": num_layers,
+        "use_scattering": use_scattering,
+        "scattering_j": scattering_j,
+        "scattering_q": scattering_q,
+        "n_scattering_features": n_scattering_features,
 
         # ADD THESE for Deep Ensemble
         "train_loader": train_loader,
