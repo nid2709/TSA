@@ -1,5 +1,8 @@
 from src.N_BEATS.data_processing import data_preprocessing
 from src.N_BEATS.N_BEATS import model_pipeline
+from src.N_BEATS.nbeats import model_pipeline
+from src.N_BEATS.nbeats_long import model_pipeline_nbeats_long
+from src.N_BEATS.synbeats import model_pipeline_synbeats
 from src.N_BEATS.N_BEATSH5 import model_pipeline_hor5
 from src.N_BEATS.N_BEATSH10 import model_pipeline_hor10
 from src.N_BEATS.data_processing_AQI import data_preprocessing_AQI
@@ -14,8 +17,17 @@ def run_pipeline():
     feature_df = data_preprocessing()
     print("\n========== Completed Data Preprocessing ==========")
     
+    # model_pipeline(feature_df)
+    # print("\n========== N-BEATS Model Completed with XAI and UQ! ==========")
+
     model_pipeline(feature_df)
-    print("\n========== N-BEATS Model Completed! ==========")
+    print("\n========== N-BEATS Model Completed For Shortterm! ==========")
+
+    # model_pipeline_nbeats_long(feature_df)
+    # print("\n========== N-BEATS Model For Longterm Completed! ==========")
+
+    # model_pipeline_synbeats(feature_df)
+    # print("\n========== syN-BEATS Model For Longterm Completed! ==========")
 
     #model_pipeline_hor5(feature_df)
     #print("\n========== N-BEATS Model Horizon Step 5 Completed! ==========")
