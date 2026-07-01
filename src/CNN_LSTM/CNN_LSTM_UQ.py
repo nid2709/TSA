@@ -30,7 +30,8 @@ def enable_dropout_during_inference(model):
 def mc_dropout_predict(
     model,
     X_test,
-    n_samples=100
+    n_samples=100,
+    batch_size=256
 ):
     """
     Run the same test data through the CNN-LSTM model many times with dropout ON.
@@ -40,11 +41,6 @@ def mc_dropout_predict(
         all predictions
     """
 
-    X_test_tensor = torch.tensor(
-        X_test,
-        dtype=torch.float32
-    )
-
     mc_predictions = []
 
     with torch.no_grad():
@@ -53,7 +49,18 @@ def mc_dropout_predict(
 
             enable_dropout_during_inference(model)
 
-            predictions = model(X_test_tensor).numpy()
+            sample_predictions = []
+
+            for start_index in range(0, len(X_test), batch_size):
+                end_index = start_index + batch_size
+                X_batch = torch.tensor(
+                    X_test[start_index:end_index],
+                    dtype=torch.float32
+                )
+                batch_predictions = model(X_batch).cpu().numpy()
+                sample_predictions.append(batch_predictions)
+
+            predictions = np.concatenate(sample_predictions, axis=0)
 
             mc_predictions.append(predictions)
 
@@ -75,7 +82,7 @@ def plot_mc_dropout_uncertainty(
     mean_predictions,
     std_predictions,
     forecast_step=1,
-    max_plot_points=1000,
+    max_plot_points=None,
     target_label="CO2",
     results_dir=None
 ):
@@ -180,7 +187,8 @@ def plot_mc_dropout_uncertainty(
 
 def run_mc_dropout_uq(
     cnn_lstm_results,
-    n_samples=100
+    n_samples=100,
+    batch_size=256
 ):
     """
     Main function to run MC Dropout UQ using results from run_cnn_lstm_model().
@@ -198,11 +206,13 @@ def run_mc_dropout_uq(
 
     print("\n========== STARTING MONTE CARLO DROPOUT UQ ==========")
     print("MC samples:", n_samples)
+    print("MC batch size:", batch_size)
 
     mean_predictions, std_predictions, mc_predictions = mc_dropout_predict(
         model,
         X_test,
-        n_samples=n_samples
+        n_samples=n_samples,
+        batch_size=batch_size
     )
 
     avg_uncertainty = np.mean(std_predictions)

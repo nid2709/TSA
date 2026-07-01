@@ -21,7 +21,28 @@ from src.LSTM.LSTM_co2 import (
     DEFAULT_OUTPUT_SEQ_LENGTH
 )
 
-#============================== START:SHAP =============================
+# This helper is for SHAP Explainability because different SHAP versions can
+# return multi-output values as either samples-first or outputs-first arrays.
+def calculate_mean_abs_shap(shap_values, feature_names):
+
+    shap_array = np.array(shap_values)
+
+    if shap_array.ndim == 4:
+        if shap_array.shape[2] == len(feature_names):
+            return np.abs(shap_array).mean(axis=(0, 1, 3))
+
+        if shap_array.shape[3] == len(feature_names):
+            return np.abs(shap_array).mean(axis=(0, 1, 2))
+
+    if shap_array.ndim == 3 and shap_array.shape[2] == len(feature_names):
+        return np.abs(shap_array).mean(axis=(0, 1))
+
+    raise ValueError(
+        "Unexpected SHAP values shape for LSTM: "
+        f"{shap_array.shape}"
+    )
+
+#============================== START:SHAP FOR LSTM =============================
 def run_shap_experiment(results=None):
 
     if results is None:
@@ -64,14 +85,14 @@ def run_shap_experiment(results=None):
 
     model.eval()
 
-    print("\nCreating SHAP GradientExplainer...")
+    print("\nCreating SHAP GradientExplainer for LSTM...")
 
     explainer = shap.GradientExplainer(
         model,
         background
     )
 
-    print("Calculating SHAP values...")
+    print("Calculating SHAP values for LSTM...")
 
     shap_values = explainer.shap_values(test_samples)
 
@@ -82,7 +103,10 @@ def run_shap_experiment(results=None):
     print("\nSHAP Values Shape:")
     print(np.array(shap_values).shape)
 
-    mean_abs_shap = np.abs(shap_values).mean(axis=(0, 1, 3))
+    mean_abs_shap = calculate_mean_abs_shap(
+        shap_values,
+        feature_names
+    )
 
     print("\n========== GLOBAL FEATURE IMPORTANCE ==========")
 
@@ -94,7 +118,7 @@ def run_shap_experiment(results=None):
         print(f"{feature:25s} {importance:.6f}")
 
     # ==============================
-    # SHAP GLOBAL FEATURE IMPORTANCE PLOT
+    # SHAP GLOBAL FEATURE IMPORTANCE PLOT for LSTM
     # ==============================
 
     sorted_items = sorted(
@@ -121,7 +145,7 @@ def run_shap_experiment(results=None):
         "shap_global_feature_importance_lstm.png"
     )
     plt.savefig(save_path, dpi=300)
-    print("Saved plot:", save_path)
+    #print("Saved plot:", save_path)
 
     #plt.show()
     plt.close()
@@ -131,8 +155,10 @@ def run_shap_experiment(results=None):
 
     pfi_results = run_pfi_analysis(
         model=model,
-        X_test=X_test[:500],
-        actuals=actuals[:500],
+        # X_test=X_test[:2000],
+        # actuals=actuals[:2000],
+        X_test=X_test,
+        actuals=actuals,
         feature_names=feature_names,
         results_dir=results_dir
     )
@@ -163,10 +189,9 @@ def run_shap_experiment(results=None):
     print("\n========== LSTM EXPLAINABILITY FINISHED ==========")
 
     return pfi_results
+#============================== END:SHAP FOR LSTM =============================
 
-#============================== END:SHAP =============================
-
-#============================== START:PFI =============================
+#============================== START:PFI FOR LSTM =============================
 def run_pfi_analysis(
     model,
     X_test,
@@ -236,7 +261,7 @@ def run_pfi_analysis(
         reverse=True
     )
 
-    # Plot
+    # Plot PFI feature importance for LSTM
     sorted_features = [item[0] for item in pfi_results]
     sorted_importance = [item[1] for item in pfi_results]
     colors = [
@@ -284,22 +309,22 @@ def run_pfi_analysis(
         "pfi_feature_importance_lstm.png"
     )
     plt.savefig(save_path, dpi=300)
-    print("Saved plot:", save_path)
+    # print("Saved plot:", save_path)
 
     #plt.show()
     plt.close()
 
     return pfi_results
-#============================== END:PFI ===============================
+#============================== END:PFI FOR LSTM ===============================
 
-#============================== START:INTEGRATED GRADIENTS =============================
+#============================== START:INTEGRATED GRADIENTS FOR LSTM =============================
 def run_integrated_gradients_analysis(
     model,
     X_test,
     feature_names,
     forecast_step=1,
     num_samples=100,
-    max_timesteps=1500,
+    max_plot_points=None,
     results_dir=None
 ):
 
@@ -349,7 +374,7 @@ def run_integrated_gradients_analysis(
 
     print("Attributions shape:", attributions.shape)
 
-    # Mean absolute attribution per feature
+    # Mean absolute attribution per feature for LSTM
     feature_importance = np.abs(attributions).mean(axis=(0, 1))
 
     print("\n========== IG FEATURE IMPORTANCE ==========")
@@ -361,7 +386,7 @@ def run_integrated_gradients_analysis(
     ):
         print(f"{feature:25s} {importance:.6f}")
 
-    # Plot feature importance
+    # Plot IG feature importance for LSTM
     sorted_items = sorted(
         zip(feature_names, feature_importance),
         key=lambda x: x[1],
@@ -376,7 +401,7 @@ def run_integrated_gradients_analysis(
     plt.xlabel("Mean Absolute Integrated Gradients Attribution")
     plt.ylabel("Feature")
     plt.title(
-        f"Integrated Gradients Feature Importance "
+        f"Integrated Gradients Feature Importance for LSTM "
         f"(Forecast Step {forecast_step})"
     )
     plt.gca().invert_yaxis()
@@ -393,17 +418,17 @@ def run_integrated_gradients_analysis(
     save_path = os.path.join(
         results_dir,
         "integrated_gradients",
-        f"ig_feature_importance_step_{forecast_step}.png"
+        f"ig_feature_importance_lstm_step_{forecast_step}.png"
     )
     plt.savefig(save_path, dpi=300)
-    print("Saved plot:", save_path)
+    #print("Saved plot:", save_path)
 
     #plt.show()
     plt.close()
 
-    # Mean absolute attribution per timestep
+    # Mean absolute attribution per timestep for LSTM
     timestep_importance = np.abs(attributions).mean(axis=(0, 2))
-    timestep_importance_plot = timestep_importance[:max_timesteps]
+    timestep_importance_plot = timestep_importance[:max_plot_points]
 
     plt.figure(figsize=(8, 4))
     plt.plot(
@@ -414,7 +439,7 @@ def run_integrated_gradients_analysis(
     plt.xlabel("Input Timestep")
     plt.ylabel("Mean Absolute Attribution")
     plt.title(
-        f"Integrated Gradients Temporal Importance "
+        f"Integrated Gradients Temporal Importance for LSTM "
         f"(Forecast Step {forecast_step})"
     )
     plt.grid(True)
@@ -423,16 +448,16 @@ def run_integrated_gradients_analysis(
     save_path = os.path.join(
         results_dir,
         "integrated_gradients",
-        f"ig_temporal_importance_step_{forecast_step}.png"
+        f"ig_temporal_importance_lstm_step_{forecast_step}.png"
     )
     plt.savefig(save_path, dpi=300)
-    print("Saved plot:", save_path)
+    #print("Saved plot:", save_path)
 
     #plt.show()
     plt.close()
 
     return attributions, feature_importance, timestep_importance
-#============================== END:INTEGRATED GRADIENTS ===============================
+#============================== END:INTEGRATED GRADIENTS FOR LSTM ===============================
 
 if __name__ == "__main__":
     run_shap_experiment()

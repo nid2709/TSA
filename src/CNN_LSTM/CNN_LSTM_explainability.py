@@ -155,8 +155,10 @@ def run_shap_experiment(results=None):
 
     pfi_results = run_pfi_analysis(
         model=model,
-        X_test=X_test[:1000],
-        actuals=actuals[:1000],
+        # X_test=X_test[:2000],
+        # actuals=actuals[:2000],
+        X_test=X_test,
+        actuals=actuals,
         feature_names=feature_names,
         results_dir=results_dir
     )
@@ -322,7 +324,7 @@ def run_integrated_gradients_analysis(
     feature_names,
     forecast_step=1,
     num_samples=100,
-    max_plot_points=1000,
+    max_plot_points=None,
     results_dir=None
 ):
 

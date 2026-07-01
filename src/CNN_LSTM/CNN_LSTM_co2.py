@@ -1,5 +1,6 @@
 import copy
 import os
+import time
 
 MPL_CONFIG_DIR = os.path.join(
     os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")),
@@ -17,8 +18,19 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+
+from src.CNN_LSTM.CNN_LSTM_data_processing import (
+    add_station_features,
+    build_future_target_reference,
+    clip_outliers_from_train,
+    drop_short_stations_for_windowing,
+    fill_missing_dataframe,
+    preprocess_data,
+    save_future_target_reference,
+    scale_data,
+    train_val_test_spliting,
+)
 
 try:
     from kymatio.numpy import Scattering1D
@@ -44,23 +56,31 @@ BASE_FEATURES = [
 
 TARGET = 'scd41_co2'
 STATION_COLUMN = 'station_id'
+SEGMENT_COLUMN = '_continuous_segment_id'
 
-DEFAULT_INPUT_SEQ_LENGTH = 288
-DEFAULT_OUTPUT_SEQ_LENGTH = 48
-DEFAULT_BATCH_SIZE = 32
-DEFAULT_EPOCHS = 10
-DEFAULT_LEARNING_RATE = 0.00001
-DEFAULT_HIDDEN_SIZE = 96
+DEFAULT_INPUT_SEQ_LENGTH = 192
+DEFAULT_OUTPUT_SEQ_LENGTH = 6
+DEFAULT_BATCH_SIZE = 64
+DEFAULT_EPOCHS = 15
+DEFAULT_LEARNING_RATE = 0.00005
+DEFAULT_HIDDEN_SIZE = 128
 DEFAULT_RESAMPLE_TIME = '15min'
-DEFAULT_DROPOUT_RATE = 0.25
-DEFAULT_WEIGHT_DECAY = 5e-4
+DEFAULT_DROPOUT_RATE = 0.2
+DEFAULT_WEIGHT_DECAY = 1e-4
 DEFAULT_NUM_LAYERS = 2
+
+#Extra data/training Safety settings
+DEFAULT_MAX_FILL_STEPS = 2
+DEFAULT_DROP_SHORT_STATIONS = True
+DEFAULT_CLIP_OUTLIERS = True # Only make this false when need to preserve all original sensor peaks
+DEFAULT_OUTLIER_CLIP_FACTOR = 1.5
+DEFAULT_RESTORE_BEST_MODEL = True
 conv_channels = 96
 
 DEFAULT_USE_SCATTERING = False
 DEFAULT_SCATTERING_J = 4
 DEFAULT_SCATTERING_Q = 8
-DEFAULT_N_SCATTERING_FEATURES = 8
+DEFAULT_N_SCATTERING_FEATURES = 16
 
 
 def get_target_label(target_column):
@@ -80,6 +100,19 @@ def get_target_label(target_column):
     )
 
 
+def format_elapsed_time(seconds):
+    minutes, remaining_seconds = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+
+    if hours >= 1:
+        return f"{int(hours)}h {int(minutes)}m {remaining_seconds:.2f}s"
+
+    if minutes >= 1:
+        return f"{int(minutes)}m {remaining_seconds:.2f}s"
+
+    return f"{remaining_seconds:.2f}s"
+
+
 def get_cnn_lstm_results_dir(
     input_seq_length=DEFAULT_INPUT_SEQ_LENGTH,
     output_seq_length=DEFAULT_OUTPUT_SEQ_LENGTH,
@@ -91,6 +124,10 @@ def get_cnn_lstm_results_dir(
     dropout_rate=DEFAULT_DROPOUT_RATE,
     weight_decay=DEFAULT_WEIGHT_DECAY,
     num_layers=DEFAULT_NUM_LAYERS,
+    max_fill_steps=DEFAULT_MAX_FILL_STEPS,
+    drop_short_stations=DEFAULT_DROP_SHORT_STATIONS,
+    clip_outliers=DEFAULT_CLIP_OUTLIERS,
+    restore_best_model=DEFAULT_RESTORE_BEST_MODEL,
     use_scattering=DEFAULT_USE_SCATTERING,
     scattering_j=DEFAULT_SCATTERING_J,
     scattering_q=DEFAULT_SCATTERING_Q,
@@ -112,6 +149,10 @@ def get_cnn_lstm_results_dir(
         f"DR{dropout_rate}_"
         f"WD{weight_decay}_"
         f"NL{num_layers}_"
+        f"GF{max_fill_steps}_"
+        f"DSS{int(drop_short_stations)}_"
+        f"CLP{int(clip_outliers)}_"
+        f"RB{int(restore_best_model)}_"
         f"SWT{int(use_scattering)}_"
         f"SWJ{scattering_j if use_scattering else 0}_"
         f"SWQ{scattering_q if use_scattering else 0}_"
@@ -119,232 +160,6 @@ def get_cnn_lstm_results_dir(
     )
 
     return os.path.join(project_root, folder_name)
-
-
-def add_time_features(df):
-    df = df.copy()
-
-    hour = df.index.hour
-    dayofweek = df.index.dayofweek
-
-    df['hour_sin'] = np.sin(2 * np.pi * hour / 24)
-    df['hour_cos'] = np.cos(2 * np.pi * hour / 24)
-
-    df['dayofweek_sin'] = np.sin(2 * np.pi * dayofweek / 7)
-    df['dayofweek_cos'] = np.cos(2 * np.pi * dayofweek / 7)
-
-    df['is_weekend'] = (dayofweek >= 5).astype(int)
-
-    return df
-
-
-def preprocess_data(df, resample_time=DEFAULT_RESAMPLE_TIME):
-    df = df.copy()
-
-    print("\n========== PREPROCESSING ==========")
-    print("Raw dataset shape:", df.shape)
-
-    print(
-        "\nStations available:",
-        sorted(df[STATION_COLUMN].unique().tolist())
-    )
-
-    df = add_time_features(df)
-    df = df[BASE_FEATURES + [STATION_COLUMN]]
-
-    print("\nSelected features:")
-    print(BASE_FEATURES)
-    print("\nAfter feature selection:", df.shape)
-
-    df = (
-        df.groupby(STATION_COLUMN)
-        .resample(resample_time)
-        .mean()
-        .drop(columns=STATION_COLUMN, errors='ignore')
-        .reset_index(level=0)
-    )
-
-    print(f"\nAfter {resample_time} resampling:", df.shape)
-
-    return df[BASE_FEATURES + [STATION_COLUMN]]
-
-
-def train_val_test_spliting(feature_df):
-    print("\n========== TRAIN, VALIDATION AND TEST SPLIT ==========")
-
-    train_ratio = 0.70
-    val_ratio = 0.15
-    test_ratio = 0.15
-
-    feature_df = feature_df.copy()
-
-    if "timestamp" not in feature_df.columns:
-        feature_df["timestamp"] = feature_df.index
-
-    # Keep timestamp only as a column. After resampling, pandas can also keep
-    # timestamp as the index name, which makes sort_values("timestamp") ambiguous.
-    feature_df = feature_df.reset_index(drop=True)
-
-    def split_station_data(station_data):
-        station_data = station_data.sort_values("timestamp")
-        n_rows = len(station_data)
-        train_end = int(n_rows * train_ratio)
-        val_end = train_end + int(n_rows * val_ratio)
-
-        return (
-            station_data.iloc[:train_end],
-            station_data.iloc[train_end:val_end],
-            station_data.iloc[val_end:],
-        )
-
-    train_parts = []
-    val_parts = []
-    test_parts = []
-
-    for station_id, station_data in feature_df.groupby(STATION_COLUMN, sort=True):
-        station_train, station_val, station_test = split_station_data(
-            station_data
-        )
-
-        train_parts.append(station_train)
-        val_parts.append(station_val)
-        test_parts.append(station_test)
-
-        print(f"\nStation {station_id}")
-        print(
-            f"Train: "
-            f"{station_train['timestamp'].min()} "
-            f"-> "
-            f"{station_train['timestamp'].max()} "
-            f"Shape: {station_train.shape}"
-        )
-        print(
-            f"Validation: "
-            f"{station_val['timestamp'].min()} "
-            f"-> "
-            f"{station_val['timestamp'].max()} "
-            f"Shape: {station_val.shape}"
-        )
-        print(
-            f"Test: "
-            f"{station_test['timestamp'].min()} "
-            f"-> "
-            f"{station_test['timestamp'].max()} "
-            f"Shape: {station_test.shape}"
-        )
-
-    train_df = pd.concat(train_parts).sort_values(
-        [STATION_COLUMN, "timestamp"]
-    ).reset_index(drop=True)
-    val_df = pd.concat(val_parts).sort_values(
-        [STATION_COLUMN, "timestamp"]
-    ).reset_index(drop=True)
-    test_df = pd.concat(test_parts).sort_values(
-        [STATION_COLUMN, "timestamp"]
-    ).reset_index(drop=True)
-
-    total_rows = len(feature_df)
-
-    print("\nOverall Train shape:", train_df.shape)
-    print("Overall Validation shape:", val_df.shape)
-    print("Overall Test shape:", test_df.shape)
-
-    print("Train percentage:", len(train_df) / total_rows * 100)
-    print("Validation percentage:", len(val_df) / total_rows * 100)
-    print("Test percentage:", len(test_df) / total_rows * 100)
-
-    split_counts = pd.concat(
-        [
-            train_df.groupby(STATION_COLUMN).size().rename("train"),
-            val_df.groupby(STATION_COLUMN).size().rename("val"),
-            test_df.groupby(STATION_COLUMN).size().rename("test"),
-        ],
-        axis=1
-    ).fillna(0).astype(int)
-
-    print("\nRows per station:")
-    print(split_counts)
-
-    return train_df, val_df, test_df
-
-
-def fill_missing_parts(parts):
-    cleaned_parts = []
-    input_features = [col for col in BASE_FEATURES if col != TARGET]
-
-    for part in parts:
-        part = part.copy()
-
-        print("\nMissing values before interpolation:")
-        print(part.isna().sum().sum())
-
-        part = part.dropna(subset=[TARGET])
-        part[input_features] = part[input_features].ffill().bfill()
-        part = part.dropna()
-
-        print("Missing values after interpolation:")
-        print(part.isna().sum().sum())
-
-        if len(part) > 0:
-            cleaned_parts.append(part)
-
-    return cleaned_parts
-
-
-def fill_missing_dataframe(df):
-    cleaned_parts = []
-    input_features = [col for col in BASE_FEATURES if col != TARGET]
-
-    for station_id, station_df in df.groupby(STATION_COLUMN, sort=True):
-        station_df = station_df.sort_values("timestamp").copy()
-
-        print(f"\nMissing values before interpolation (Station {station_id}):")
-        print(station_df.isna().sum().sum())
-
-        station_df = station_df.dropna(subset=[TARGET])
-        station_df[input_features] = station_df[input_features].ffill().bfill()
-        station_df = station_df.dropna()
-
-        print(f"Missing values after interpolation (Station {station_id}):")
-        print(station_df.isna().sum().sum())
-
-        if len(station_df) > 0:
-            cleaned_parts.append(station_df)
-
-    if len(cleaned_parts) == 0:
-        raise ValueError("No rows left after missing-value handling.")
-
-    return pd.concat(cleaned_parts).sort_values(
-        [STATION_COLUMN, "timestamp"]
-    ).reset_index(drop=True)
-
-
-def add_station_features(df, station_ids):
-    df = df.copy()
-
-    for station_id in station_ids:
-        df[f"station_{station_id}"] = (
-            df[STATION_COLUMN] == station_id
-        ).astype(int)
-
-    return df
-
-
-def scale_data(train_df, val_df, test_df, model_features):
-    scaler = MinMaxScaler()
-    scaler.fit(train_df[model_features])
-
-    print("\nScaler fitted ONLY on training data.")
-
-    train_df = train_df.copy()
-    val_df = val_df.copy()
-    test_df = test_df.copy()
-
-    train_df[model_features] = scaler.transform(train_df[model_features])
-    val_df[model_features] = scaler.transform(val_df[model_features])
-    test_df[model_features] = scaler.transform(test_df[model_features])
-
-    return train_df, val_df, test_df
 
 
 def get_scattering_feature_names(n_scattering_features):
@@ -410,22 +225,41 @@ def create_sequences(
     X, y = [], []
     target_index = model_features.index(TARGET)
 
-    data = data.sort_values([STATION_COLUMN, "timestamp"])
+    if SEGMENT_COLUMN not in data.columns:
+        raise ValueError(
+            f"Missing {SEGMENT_COLUMN}. Run fill_missing_dataframe() "
+            "before creating sequences."
+        )
 
-    for station_id, station_data in data.groupby(STATION_COLUMN, sort=True):
-        values = station_data[model_features].values
+    data = data.sort_values(
+        [STATION_COLUMN, SEGMENT_COLUMN, "timestamp"]
+    )
 
-        print("\nOriginal station data shape before sequencing:", station_data.shape)
+    grouped_segments = data.groupby(
+        [STATION_COLUMN, SEGMENT_COLUMN],
+        sort=True
+    )
+
+    for (station_id, segment_id), segment_data in grouped_segments:
+        values = segment_data[model_features].values
+
+        print(
+            "\nContinuous segment before sequencing:",
+            f"station={station_id}, segment={segment_id}, shape={segment_data.shape}"
+        )
         required_length = input_seq_length + output_seq_length
 
         if len(values) <= required_length:
             print("\nSkipping sequence generation:")
             print(f"Station: {station_id}")
+            print(f"Segment: {segment_id}")
             print(f"Available rows: {len(values)}")
             print(f"Required minimum rows: {required_length + 1}")
             continue
 
-        for i in range(len(values) - input_seq_length - output_seq_length):
+        for i in range(
+            len(values) - input_seq_length - output_seq_length + 1
+        ):
             input_window = values[i:i + input_seq_length]
 
             if use_scattering:
@@ -499,24 +333,117 @@ def prepare_cnn_lstm_data(
     output_seq_length=DEFAULT_OUTPUT_SEQ_LENGTH,
     batch_size=DEFAULT_BATCH_SIZE,
     resample_time=DEFAULT_RESAMPLE_TIME,
+    max_fill_steps=DEFAULT_MAX_FILL_STEPS,
+    drop_short_stations=DEFAULT_DROP_SHORT_STATIONS,
+    clip_outliers=DEFAULT_CLIP_OUTLIERS,
+    outlier_clip_factor=DEFAULT_OUTLIER_CLIP_FACTOR,
     use_scattering=DEFAULT_USE_SCATTERING,
     scattering_j=DEFAULT_SCATTERING_J,
     scattering_q=DEFAULT_SCATTERING_Q,
     n_scattering_features=DEFAULT_N_SCATTERING_FEATURES
 ):
-    df = preprocess_data(df, resample_time=resample_time)
+    df = preprocess_data(
+        df,
+        base_features=BASE_FEATURES,
+        station_column=STATION_COLUMN,
+        resample_time=resample_time
+    )
+
+    if drop_short_stations:
+        df = drop_short_stations_for_windowing(
+            df,
+            station_column=STATION_COLUMN,
+            input_seq_length=input_seq_length,
+            output_seq_length=output_seq_length
+        )
 
     station_ids = sorted(df[STATION_COLUMN].unique().tolist())
 
-    train_df, val_df, test_df = train_val_test_spliting(df)
+    train_df, val_df, test_df = train_val_test_spliting(
+        df,
+        station_column=STATION_COLUMN
+    )
 
-    train_df = fill_missing_dataframe(train_df)
-    val_df = fill_missing_dataframe(val_df)
-    test_df = fill_missing_dataframe(test_df)
+    print("\n========== DATA GAP CONFIGURATION ==========")
+    print("Expected timestamp interval:", resample_time)
+    print("Maximum feature fill steps:", max_fill_steps)
+    print(
+        "Maximum feature fill duration:",
+        pd.Timedelta(resample_time) * max_fill_steps
+    )
+    print("Sequences crossing detected timestamp gaps: disabled")
 
-    train_df = add_station_features(train_df, station_ids)
-    val_df = add_station_features(val_df, station_ids)
-    test_df = add_station_features(test_df, station_ids)
+    train_df = fill_missing_dataframe(
+        train_df,
+        base_features=BASE_FEATURES,
+        target_column=TARGET,
+        station_column=STATION_COLUMN,
+        segment_column=SEGMENT_COLUMN,
+        resample_time=resample_time,
+        max_fill_steps=max_fill_steps
+    )
+    val_df = fill_missing_dataframe(
+        val_df,
+        base_features=BASE_FEATURES,
+        target_column=TARGET,
+        station_column=STATION_COLUMN,
+        segment_column=SEGMENT_COLUMN,
+        resample_time=resample_time,
+        max_fill_steps=max_fill_steps
+    )
+    test_df = fill_missing_dataframe(
+        test_df,
+        base_features=BASE_FEATURES,
+        target_column=TARGET,
+        station_column=STATION_COLUMN,
+        segment_column=SEGMENT_COLUMN,
+        resample_time=resample_time,
+        max_fill_steps=max_fill_steps
+    )
+
+    if clip_outliers:
+        train_df, val_df, test_df = clip_outliers_from_train(
+            train_df,
+            val_df,
+            test_df,
+            BASE_FEATURES,
+            clip_factor=outlier_clip_factor
+        )
+    else:
+        print("\n========== OUTLIER CLIPPING DISABLED ==========")
+
+    print("\n========== FUTURE TARGET REFERENCE ==========")
+    print(
+        "Creating ahead target columns for analysis only:",
+        f"step 1 to step {output_seq_length}"
+    )
+    print("These columns are not used as CNN-LSTM input features.")
+    future_target_reference = build_future_target_reference(
+        train_df,
+        val_df,
+        test_df,
+        output_seq_length=output_seq_length,
+        target_column=TARGET,
+        station_column=STATION_COLUMN,
+        segment_column=SEGMENT_COLUMN
+    )
+    print("Future target reference shape:", future_target_reference.shape)
+
+    train_df = add_station_features(
+        train_df,
+        station_ids,
+        station_column=STATION_COLUMN
+    )
+    val_df = add_station_features(
+        val_df,
+        station_ids,
+        station_column=STATION_COLUMN
+    )
+    test_df = add_station_features(
+        test_df,
+        station_ids,
+        station_column=STATION_COLUMN
+    )
 
     station_features = [
         f"station_{station_id}"
@@ -527,11 +454,12 @@ def prepare_cnn_lstm_data(
     # station_id itself is still only used for splitting/window creation.
     model_features = BASE_FEATURES + station_features
 
-    train_df, val_df, test_df = scale_data(
+    train_df, val_df, test_df, scaler = scale_data(
         train_df,
         val_df,
         test_df,
-        model_features
+        model_features,
+        target_column=TARGET
     )
 
     scattering_transform = None
@@ -608,7 +536,8 @@ def prepare_cnn_lstm_data(
         X_train.shape[2],
         X_train,
         X_test,
-        model_features
+        model_features,
+        future_target_reference
     )
 
 
@@ -640,10 +569,30 @@ class CNNLSTMModel(nn.Module):
 
 
 # Optional alternative loss for peak-weighted experiments.
-# Currently unused because train_model uses SmoothL1Loss.
+# Currently unused because train_model uses MSELoss.
 # def weighted_mse_loss(predictions, targets):
 #     weights = 1.0 + 5.0 * targets
 #     return torch.mean(weights * (predictions - targets) ** 2)
+
+
+def print_batch_sanity_check(model, train_loader):
+    print("\n========== BATCH SANITY CHECK ==========")
+
+    model.eval()
+    X_batch, y_batch = next(iter(train_loader))
+
+    with torch.no_grad():
+        y_pred = model(X_batch)
+
+    batch_loss = nn.MSELoss()(y_pred, y_batch)
+
+    print("X_batch shape:", X_batch.shape)
+    print("y_batch shape:", y_batch.shape)
+    print("y_pred shape:", y_pred.shape)
+    print("X_batch min/max:", X_batch.min().item(), X_batch.max().item())
+    print("y_batch min/max:", y_batch.min().item(), y_batch.max().item())
+    print("y_pred min/max:", y_pred.min().item(), y_pred.max().item())
+    print("Batch MSE loss:", batch_loss.item())
 
 
 def evaluate_loss(model, loader, criterion):
@@ -667,9 +616,10 @@ def train_model(
     patience=5,
     learning_rate=DEFAULT_LEARNING_RATE,
     weight_decay=DEFAULT_WEIGHT_DECAY,
+    restore_best_model=DEFAULT_RESTORE_BEST_MODEL,
     min_delta=1e-6
 ):
-    criterion = nn.SmoothL1Loss(beta=0.01)
+    criterion = nn.MSELoss()
 
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -734,18 +684,113 @@ def train_model(
         #     print(f"Early stopping at epoch {epoch + 1}")
         #     break
 
-    # Best-validation checkpoint restore disabled for fixed-epoch training.
-    # If this is enabled, the final model is selected by validation loss even
-    # though early stopping is disabled.
-    # if best_model_state is not None:
-    #     model.load_state_dict(best_model_state)
+    if restore_best_model and best_model_state is not None:
+        model.load_state_dict(best_model_state)
+        print("Restored best validation checkpoint after fixed-epoch training.")
 
     print("Best Val Loss:", best_val_loss)
 
     return model, train_losses, val_losses
 
 
-def evaluate_model(model, test_loader):
+def calculate_metrics(actuals, predictions):
+    mse = mean_squared_error(actuals.flatten(), predictions.flatten())
+    mae = mean_absolute_error(actuals.flatten(), predictions.flatten())
+    rmse = np.sqrt(mse)
+    r2 = r2_score(actuals.flatten(), predictions.flatten())
+
+    return mse, mae, rmse, r2
+
+
+def calculate_horizon_metrics(actuals, predictions):
+    horizon_metrics = []
+
+    for step_index in range(actuals.shape[1]):
+        forecast_step = step_index + 1
+        step_actuals = actuals[:, step_index]
+        step_predictions = predictions[:, step_index]
+        step_mse = mean_squared_error(step_actuals, step_predictions)
+        step_mae = mean_absolute_error(step_actuals, step_predictions)
+        step_rmse = np.sqrt(step_mse)
+        step_r2 = r2_score(step_actuals, step_predictions)
+
+        horizon_metrics.append({
+            "forecast_step": forecast_step,
+            "mse": step_mse,
+            "mae": step_mae,
+            "rmse": step_rmse,
+            "r2": step_r2,
+        })
+
+    return pd.DataFrame(horizon_metrics)
+
+
+def save_horizon_metrics(horizon_metrics, results_dir):
+    main_plots_dir = os.path.join(results_dir, "main_plots")
+    os.makedirs(main_plots_dir, exist_ok=True)
+    metrics_path = os.path.join(main_plots_dir, "per_horizon_metrics.csv")
+    horizon_metrics.to_csv(metrics_path, index=False)
+    return metrics_path
+
+
+def plot_horizon_error_analysis(horizon_metrics, results_dir):
+    main_plots_dir = os.path.join(results_dir, "main_plots")
+    os.makedirs(main_plots_dir, exist_ok=True)
+
+    fig, axes = plt.subplots(
+        2,
+        1,
+        figsize=(10, 7),
+        sharex=True
+    )
+
+    axes[0].plot(
+        horizon_metrics["forecast_step"],
+        horizon_metrics["mae"],
+        marker="o",
+        linewidth=1.8,
+        label="MAE"
+    )
+    axes[0].plot(
+        horizon_metrics["forecast_step"],
+        horizon_metrics["rmse"],
+        marker="o",
+        linewidth=1.8,
+        label="RMSE"
+    )
+    axes[0].set_ylabel("Error")
+    axes[0].set_title("Forecast Error by Horizon")
+    axes[0].legend()
+    axes[0].grid(alpha=0.25)
+
+    axes[1].plot(
+        horizon_metrics["forecast_step"],
+        horizon_metrics["r2"],
+        marker="o",
+        color="tab:green",
+        linewidth=1.8,
+        label="R2"
+    )
+    axes[1].set_xlabel("Forecast step")
+    axes[1].set_ylabel("R2 Score")
+    axes[1].set_title("Forecast Skill by Horizon")
+    axes[1].legend()
+    axes[1].grid(alpha=0.25)
+    axes[1].xaxis.set_major_locator(MaxNLocator(integer=True))
+
+    fig.tight_layout()
+
+    save_path = os.path.join(
+        main_plots_dir,
+        "horizon_error_analysis.png"
+    )
+    fig.savefig(save_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+    return save_path
+
+
+def evaluate_model(model, test_loader, results_dir=None):
     model.eval()
     predictions, actuals = [], []
 
@@ -758,16 +803,24 @@ def evaluate_model(model, test_loader):
     predictions = np.array(predictions)
     actuals = np.array(actuals)
 
-    mse = mean_squared_error(actuals.flatten(), predictions.flatten())
-    mae = mean_absolute_error(actuals.flatten(), predictions.flatten())
-    rmse = np.sqrt(mse)
-    r2 = r2_score(actuals.flatten(), predictions.flatten())
+    mse, mae, rmse, r2 = calculate_metrics(actuals, predictions)
 
-    print("\n========== MODEL EVALUATION ==========")
+    print("\n========== MODEL EVALUATION ON SCALED VALUES ==========")
     print("Overall MSE:", mse)
     print("Overall MAE:", mae)
     print("Overall RMSE:", rmse)
     print("Overall R2 Score:", r2)
+
+    horizon_metrics = calculate_horizon_metrics(actuals, predictions)
+
+    if results_dir is not None:
+        metrics_path = save_horizon_metrics(horizon_metrics, results_dir)
+        print("Per-horizon metrics CSV:", metrics_path)
+        horizon_plot_path = plot_horizon_error_analysis(
+            horizon_metrics,
+            results_dir
+        )
+        print("Horizon error analysis plot:", horizon_plot_path)
 
     forecast_steps = sorted(
         set([1, max(1, actuals.shape[1] // 2), actuals.shape[1]])
@@ -775,23 +828,26 @@ def evaluate_model(model, test_loader):
 
     print("\n========== PER-HORIZON EVALUATION ==========")
     for forecast_step in forecast_steps:
-        step_index = forecast_step - 1
-        step_actuals = actuals[:, step_index]
-        step_predictions = predictions[:, step_index]
-        step_mse = mean_squared_error(step_actuals, step_predictions)
-        step_mae = mean_absolute_error(step_actuals, step_predictions)
-        step_rmse = np.sqrt(step_mse)
-        step_r2 = r2_score(step_actuals, step_predictions)
+        step_metrics = horizon_metrics.loc[
+            horizon_metrics["forecast_step"] == forecast_step
+        ].iloc[0]
 
         print(
             f"Step {forecast_step} -> "
-            f"MSE: {step_mse:.6f}, "
-            f"MAE: {step_mae:.6f}, "
-            f"RMSE: {step_rmse:.6f}, "
-            f"R2: {step_r2:.6f}"
+            f"MSE: {step_metrics['mse']:.6f}, "
+            f"MAE: {step_metrics['mae']:.6f}, "
+            f"RMSE: {step_metrics['rmse']:.6f}, "
+            f"R2: {step_metrics['r2']:.6f}"
         )
 
-    return predictions, actuals, mse, mae, rmse, r2
+    return (
+        predictions,
+        actuals,
+        mse,
+        mae,
+        rmse,
+        r2
+    )
 
 
 def plot_loss_curves(train_losses, val_losses, results_dir=None):
@@ -817,11 +873,93 @@ def plot_loss_curves(train_losses, val_losses, results_dir=None):
     plt.close()
 
 
+def plot_scattering_wavelet_features(
+    X_train,
+    model_features,
+    n_scattering_features,
+    scattering_j,
+    scattering_q,
+    results_dir
+):
+    if n_scattering_features <= 0 or len(X_train) == 0:
+        return None
+
+    target_index = model_features.index(TARGET)
+    scattering_feature_names = get_scattering_feature_names(
+        n_scattering_features
+    )
+    scattering_indices = [
+        model_features.index(feature_name)
+        for feature_name in scattering_feature_names
+    ]
+
+    sample_window = X_train[0]
+    co2_signal = sample_window[:, target_index]
+
+    # Scattering features are static within a sequence, so the first timestep
+    # contains the same coefficient values supplied at every timestep.
+    scattering_values = sample_window[0, scattering_indices]
+
+    fig, axes = plt.subplots(
+        2,
+        1,
+        figsize=(10, 7),
+        gridspec_kw={"height_ratios": [2, 1]}
+    )
+
+    axes[0].plot(
+        np.arange(len(co2_signal)),
+        co2_signal,
+        color="tab:blue",
+        linewidth=1.8
+    )
+    axes[0].set_title("Representative Input Window")
+    axes[0].set_xlabel("Input timestep")
+    axes[0].set_ylabel("Scaled CO2")
+    axes[0].grid(alpha=0.25)
+
+    feature_labels = [
+        f"S{i + 1}"
+        for i in range(n_scattering_features)
+    ]
+    axes[1].bar(
+        feature_labels,
+        scattering_values,
+        color="tab:orange"
+    )
+    axes[1].set_title(
+        f"Static Scattering Features Used by CNN-LSTM "
+        f"(J={scattering_j}, Q={scattering_q})"
+    )
+    axes[1].set_xlabel("Selected scattering coefficient")
+    axes[1].set_ylabel("Mean coefficient value")
+    axes[1].grid(axis="y", alpha=0.25)
+
+    fig.suptitle(
+        "Scattering Wavelet Transform Feature Example",
+        fontsize=14
+    )
+    fig.tight_layout()
+
+    main_plots_dir = os.path.join(results_dir, "main_plots")
+    os.makedirs(main_plots_dir, exist_ok=True)
+    save_path = os.path.join(
+        main_plots_dir,
+        "scattering_wavelet_features.png"
+    )
+    fig.savefig(save_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+    print("Saved scattering wavelet plot:", save_path)
+
+    return save_path
+
+
 def plot_predictions(
     actuals,
     predictions,
     forecast_step=1,
-    max_plot_points=1000,
+    max_plot_points=5000,
     results_dir=None
 ):
     step_index = forecast_step - 1
@@ -862,6 +1000,57 @@ def plot_predictions(
     plt.close()
 
 
+def plot_actual_vs_predicted_scatter(
+    actuals,
+    predictions,
+    max_points=5000,
+    results_dir=None
+):
+    actual_values = actuals.flatten()
+    predicted_values = predictions.flatten()
+
+    if max_points is not None and len(actual_values) > max_points:
+        actual_values = actual_values[:max_points]
+        predicted_values = predicted_values[:max_points]
+
+    min_value = min(actual_values.min(), predicted_values.min())
+    max_value = max(actual_values.max(), predicted_values.max())
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.scatter(
+        actual_values,
+        predicted_values,
+        alpha=0.25,
+        s=12,
+        color="tab:orange"
+    )
+    ax.plot(
+        [min_value, max_value],
+        [min_value, max_value],
+        color="tab:blue",
+        linewidth=1.5,
+        label="Perfect prediction"
+    )
+    ax.set_xlabel("Actual scaled CO2")
+    ax.set_ylabel("Predicted scaled CO2")
+    ax.set_title("Actual vs Predicted Scatter for CNN-LSTM")
+    ax.legend()
+    ax.grid(alpha=0.25)
+    fig.tight_layout()
+
+    if results_dir is not None:
+        os.makedirs(os.path.join(results_dir, "main_plots"), exist_ok=True)
+        save_path = os.path.join(
+            results_dir,
+            "main_plots",
+            "actual_vs_predicted_scatter.png"
+        )
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+        print("Saved scatter plot:", save_path)
+
+    plt.close(fig)
+
+
 def plot_forecast_comparison(actuals, predictions, results_dir=None):
     output_seq_length = actuals.shape[1]
     
@@ -882,6 +1071,12 @@ def plot_forecast_comparison(actuals, predictions, results_dir=None):
             results_dir=results_dir
         )
 
+    plot_actual_vs_predicted_scatter(
+        actuals,
+        predictions,
+        results_dir=results_dir
+    )
+
 
 def run_cnn_lstm_model(
     df,
@@ -895,12 +1090,19 @@ def run_cnn_lstm_model(
     resample_time=DEFAULT_RESAMPLE_TIME,
     weight_decay=DEFAULT_WEIGHT_DECAY,
     num_layers=DEFAULT_NUM_LAYERS,
+    max_fill_steps=DEFAULT_MAX_FILL_STEPS,
+    drop_short_stations=DEFAULT_DROP_SHORT_STATIONS,
+    clip_outliers=DEFAULT_CLIP_OUTLIERS,
+    outlier_clip_factor=DEFAULT_OUTLIER_CLIP_FACTOR,
+    restore_best_model=DEFAULT_RESTORE_BEST_MODEL,
     show_prediction_plot=True,
     use_scattering=DEFAULT_USE_SCATTERING,
     scattering_j=DEFAULT_SCATTERING_J,
     scattering_q=DEFAULT_SCATTERING_Q,
     n_scattering_features=DEFAULT_N_SCATTERING_FEATURES
 ):
+    run_start_time = time.perf_counter()
+
     print("\n========== CNN-LSTM RUN CONFIGURATION ==========")
     print("Input sequence length:", input_seq_length)
     print("Output sequence length:", output_seq_length)
@@ -912,6 +1114,12 @@ def run_cnn_lstm_model(
     print("Dropout rate:", dropout_rate)
     print("Weight decay:", weight_decay)
     print("Number of LSTM layers:", num_layers)
+    print("Maximum feature fill steps:", max_fill_steps)
+    print("Drop short stations:", drop_short_stations)
+    print("Clip outliers:", clip_outliers)
+    print("Outlier clip factor:", outlier_clip_factor)
+    print("Restore best validation checkpoint:", restore_best_model)
+    print("Gap-aware sequence generation:", True)
     print("Convolution channels:", conv_channels)
     print("Use scattering:", use_scattering)
     if use_scattering:
@@ -926,13 +1134,18 @@ def run_cnn_lstm_model(
         input_size,
         X_train,
         X_test,
-        model_features
+        model_features,
+        future_target_reference
     ) = prepare_cnn_lstm_data(
         df,
         input_seq_length=input_seq_length,
         output_seq_length=output_seq_length,
         batch_size=batch_size,
         resample_time=resample_time,
+        max_fill_steps=max_fill_steps,
+        drop_short_stations=drop_short_stations,
+        clip_outliers=clip_outliers,
+        outlier_clip_factor=outlier_clip_factor,
         use_scattering=use_scattering,
         scattering_j=scattering_j,
         scattering_q=scattering_q,
@@ -947,16 +1160,6 @@ def run_cnn_lstm_model(
         dropout=dropout_rate
     )
 
-    model, train_losses, val_losses = train_model(
-        model,
-        train_loader,
-        val_loader,
-        epochs,
-        learning_rate=learning_rate,
-        weight_decay=weight_decay
-    )
-    predictions, actuals, mse, mae, rmse, r2 = evaluate_model(model, test_loader)
-
     results_dir = get_cnn_lstm_results_dir(
         input_seq_length=input_seq_length,
         output_seq_length=output_seq_length,
@@ -968,10 +1171,51 @@ def run_cnn_lstm_model(
         dropout_rate=dropout_rate,
         weight_decay=weight_decay,
         num_layers=num_layers,
+        max_fill_steps=max_fill_steps,
+        drop_short_stations=drop_short_stations,
+        clip_outliers=clip_outliers,
+        restore_best_model=restore_best_model,
         use_scattering=use_scattering,
         scattering_j=scattering_j,
         scattering_q=scattering_q,
         n_scattering_features=n_scattering_features
+    )
+    horizon_metrics_path = os.path.join(
+        results_dir,
+        "main_plots",
+        "per_horizon_metrics.csv"
+    )
+
+    print_batch_sanity_check(
+        model,
+        train_loader
+    )
+
+    model, train_losses, val_losses = train_model(
+        model,
+        train_loader,
+        val_loader,
+        epochs,
+        learning_rate=learning_rate,
+        weight_decay=weight_decay,
+        restore_best_model=restore_best_model
+    )
+    (
+        predictions,
+        actuals,
+        mse,
+        mae,
+        rmse,
+        r2
+    ) = evaluate_model(
+        model,
+        test_loader,
+        results_dir=results_dir
+    )
+
+    future_target_reference_path = save_future_target_reference(
+        future_target_reference,
+        results_dir
     )
 
     plot_loss_curves(
@@ -980,12 +1224,28 @@ def run_cnn_lstm_model(
         results_dir=results_dir
     )
 
+    scattering_plot_path = None
+    if use_scattering:
+        scattering_plot_path = plot_scattering_wavelet_features(
+            X_train=X_train,
+            model_features=model_features,
+            n_scattering_features=n_scattering_features,
+            scattering_j=scattering_j,
+            scattering_q=scattering_q,
+            results_dir=results_dir
+        )
+
     if show_prediction_plot:
         plot_forecast_comparison(
             actuals,
             predictions,
             results_dir=results_dir
         )
+
+    run_elapsed_time = time.perf_counter() - run_start_time
+    print("\n========== CNN-LSTM RUNTIME ==========")
+    print("CNN-LSTM runtime seconds:", run_elapsed_time)
+    print("CNN-LSTM runtime:", format_elapsed_time(run_elapsed_time))
 
     return {
         "model": model,
@@ -998,6 +1258,11 @@ def run_cnn_lstm_model(
         "target_column": TARGET,
         "target_label": get_target_label(TARGET),
         "results_dir": results_dir,
+        "scattering_plot_path": scattering_plot_path,
+        "horizon_metrics_path": horizon_metrics_path,
+        "future_target_reference_path": future_target_reference_path,
+        "training_runtime_seconds": run_elapsed_time,
+        "training_runtime_formatted": format_elapsed_time(run_elapsed_time),
 
         # ADD THESE for Explainability techniques
         "X_train": X_train,
@@ -1010,6 +1275,12 @@ def run_cnn_lstm_model(
         "hidden_size": hidden_size,
         "weight_decay": weight_decay,
         "num_layers": num_layers,
+        "max_fill_steps": max_fill_steps,
+        "drop_short_stations": drop_short_stations,
+        "clip_outliers": clip_outliers,
+        "outlier_clip_factor": outlier_clip_factor,
+        "restore_best_model": restore_best_model,
+        "gap_aware_sequences": True,
         "use_scattering": use_scattering,
         "scattering_j": scattering_j,
         "scattering_q": scattering_q,

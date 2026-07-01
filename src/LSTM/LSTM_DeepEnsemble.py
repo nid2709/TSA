@@ -19,6 +19,12 @@ from src.LSTM.LSTM_co2 import (
     evaluate_model,
     plot_loss_curves,
     get_lstm_results_dir,
+    DEFAULT_HIDDEN_SIZE,
+    DEFAULT_NUM_LAYERS,
+    DEFAULT_DROPOUT_RATE,
+    DEFAULT_LEARNING_RATE,
+    DEFAULT_WEIGHT_DECAY,
+    DEFAULT_RESTORE_BEST_MODEL,
 )
 
 
@@ -33,7 +39,7 @@ def plot_deep_ensemble_uncertainty(
     mean_predictions,
     std_predictions,
     forecast_step=1,
-    max_plot_points=1500,
+    max_plot_points=None,
     target_label="CO2",
     results_dir=None
 ):
@@ -114,7 +120,7 @@ def plot_deep_ensemble_uncertainty(
         f"deep_ensemble_uncertainty_step_{forecast_step}.png"
     )
     plt.savefig(save_path, dpi=300)
-    print("Saved plot:", save_path)
+    #print("Saved plot:", save_path)
 
     #plt.show()
     plt.close()
@@ -131,7 +137,13 @@ def run_deep_ensemble_uq(
     epochs=10,
     n_models=3,
     seeds=None,
-    results_dir=None
+    results_dir=None,
+    hidden_size=DEFAULT_HIDDEN_SIZE,
+    num_layers=DEFAULT_NUM_LAYERS,
+    dropout_rate=DEFAULT_DROPOUT_RATE,
+    learning_rate=DEFAULT_LEARNING_RATE,
+    weight_decay=DEFAULT_WEIGHT_DECAY,
+    restore_best_model=DEFAULT_RESTORE_BEST_MODEL
 ):
     if seeds is None:
         seeds = [11, 22, 33]
@@ -144,6 +156,12 @@ def run_deep_ensemble_uq(
     print("\n========== DEEP ENSEMBLE UQ ==========")
     print("Number of ensemble models:", n_models)
     print("Saving Deep Ensemble plots to:", results_dir)
+    print("Hidden size:", hidden_size)
+    print("Number of LSTM layers:", num_layers)
+    print("Dropout rate:", dropout_rate)
+    print("Learning rate:", learning_rate)
+    print("Weight decay:", weight_decay)
+    print("Restore best validation checkpoint:", restore_best_model)
 
     for i in range(n_models):
         seed = seeds[i]
@@ -154,14 +172,20 @@ def run_deep_ensemble_uq(
 
         model = LSTMModel(
             input_size=input_size,
-            output_seq_length=output_seq_length
+            output_seq_length=output_seq_length,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            dropout_rate=dropout_rate
         )
 
         model, train_losses, val_losses = train_model(
             model,
             train_loader,
             val_loader,
-            epochs=epochs
+            epochs=epochs,
+            learning_rate=learning_rate,
+            weight_decay=weight_decay,
+            restore_best_model=restore_best_model
         )
 
         predictions, _, mse, mae, rmse, r2 = evaluate_model(
@@ -212,8 +236,6 @@ def run_deep_ensemble_uq(
             target_label=target_label,
             results_dir=results_dir
         )
-
-    print("\n========== LSTM DEEP ENSEMBLE FINISHED ==========")
 
     return {
         "ensemble_predictions": ensemble_predictions,

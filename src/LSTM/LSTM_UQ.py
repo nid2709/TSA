@@ -30,32 +30,44 @@ def enable_dropout_during_inference(model):
 def mc_dropout_predict(
     model,
     X_test,
-    n_samples=100
+    n_samples=100,
+    batch_size=256
 ):
     """
-    Run the same test data through the model many times with dropout ON.
+    Run the same test data through the LSTM model many times with dropout ON.
     Returns:
         mean prediction
         standard deviation
         all predictions
     """
 
-    X_test_tensor = torch.tensor(
-        X_test,
-        dtype=torch.float32
-    )
-
     mc_predictions = []
 
     with torch.no_grad():
 
-        for _ in range(n_samples):
+        for sample_index in range(n_samples):
 
             enable_dropout_during_inference(model)
 
-            predictions = model(X_test_tensor).numpy()
+            sample_predictions = []
+
+            for start_index in range(0, len(X_test), batch_size):
+                end_index = start_index + batch_size
+                X_batch = torch.tensor(
+                    X_test[start_index:end_index],
+                    dtype=torch.float32
+                )
+                batch_predictions = model(X_batch).cpu().numpy()
+                sample_predictions.append(batch_predictions)
+
+            predictions = np.concatenate(sample_predictions, axis=0)
 
             mc_predictions.append(predictions)
+
+            if (sample_index + 1) % 10 == 0 or (sample_index + 1) == n_samples:
+                print(
+                    f"MC Dropout sample {sample_index + 1}/{n_samples} completed"
+                )
 
     mc_predictions = np.array(mc_predictions)
 
@@ -70,7 +82,7 @@ def plot_mc_dropout_uncertainty(
     mean_predictions,
     std_predictions,
     forecast_step=1,
-    max_plot_points=1500,
+    max_plot_points=2000,
     target_label="CO2",
     results_dir=None
 ):
@@ -167,7 +179,7 @@ def plot_mc_dropout_uncertainty(
         f"mc_dropout_uncertainty_step_{forecast_step}.png"
     )
     plt.savefig(save_path, dpi=300)
-    print("Saved plot:", save_path)
+    #print("Saved plot:", save_path)
 
     #plt.show()
     plt.close()
@@ -175,7 +187,8 @@ def plot_mc_dropout_uncertainty(
 
 def run_mc_dropout_uq(
     lstm_results,
-    n_samples=100
+    n_samples=100,
+    batch_size=256
 ):
     """
     Main function to run MC Dropout UQ using results from run_lstm_model().
@@ -186,12 +199,20 @@ def run_mc_dropout_uq(
     actuals = lstm_results["actuals"]
     target_label = lstm_results["target_label"]
     output_seq_length = lstm_results["output_seq_length"]
-    results_dir = lstm_results.get("results_dir", get_lstm_results_dir())
+    results_dir = lstm_results.get(
+        "results_dir",
+        get_lstm_results_dir()
+    )
+
+    print("\n========== STARTING MONTE CARLO DROPOUT UQ ==========")
+    print("MC samples:", n_samples)
+    print("MC batch size:", batch_size)
 
     mean_predictions, std_predictions, mc_predictions = mc_dropout_predict(
         model,
         X_test,
-        n_samples=n_samples
+        n_samples=n_samples,
+        batch_size=batch_size
     )
 
     avg_uncertainty = np.mean(std_predictions)
