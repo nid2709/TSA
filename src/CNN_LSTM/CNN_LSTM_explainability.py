@@ -1,4 +1,5 @@
 import os
+import gc
 
 MPL_CONFIG_DIR = os.path.join(
     os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")),
@@ -15,11 +16,11 @@ from sklearn.metrics import mean_squared_error
 from captum.attr import IntegratedGradients
 
 from src.CNN_LSTM.dataLoad import load_prepare_data
-from src.CNN_LSTM.CNN_LSTM_co2 import (
-    run_cnn_lstm_model,
+from src.CNN_LSTM.CNN_LSTM_config import (
     get_cnn_lstm_results_dir,
     DEFAULT_OUTPUT_SEQ_LENGTH
 )
+from src.CNN_LSTM.CNN_LSTM_co2 import run_cnn_lstm_model
 
 # This helper is for SHAP Explainability because different SHAP versions can
 # return multi-output values as either samples-first or outputs-first arrays.
@@ -150,6 +151,9 @@ def run_shap_experiment(results=None):
     #plt.show()
     plt.close()
 
+    del shap_values, mean_abs_shap, explainer, background, test_samples
+    gc.collect()
+
     # for PFI
     actuals = results["actuals"]
 
@@ -160,7 +164,9 @@ def run_shap_experiment(results=None):
         X_test=X_test,
         actuals=actuals,
         feature_names=feature_names,
-        results_dir=results_dir
+        results_dir=results_dir,
+        max_samples=2000,
+        batch_size=256
     )
 
     # for IG - compare first forecast step with final output horizon only
@@ -192,22 +198,48 @@ def run_shap_experiment(results=None):
 #============================== END:SHAP FOR CNN-LSTM =============================
 
 #============================== START:PFI FOR CNN-LSTM =============================
+def predict_in_batches(model, X_values, batch_size=256):
+    predictions = []
+
+    with torch.no_grad():
+        for start_index in range(0, len(X_values), batch_size):
+            end_index = start_index + batch_size
+            X_batch = torch.tensor(
+                X_values[start_index:end_index],
+                dtype=torch.float32
+            )
+            batch_predictions = model(X_batch).cpu().numpy()
+            predictions.append(batch_predictions)
+
+    return np.concatenate(predictions, axis=0)
+
+
 def run_pfi_analysis(
     model,
     X_test,
     actuals,
     feature_names,
-    results_dir=None
+    results_dir=None,
+    max_samples=2000,
+    batch_size=256
 ):
 
     print("\n========== PERMUTATION FEATURE IMPORTANCE ==========")
 
     model.eval()
 
-    X_test_tensor = torch.tensor(X_test, dtype=torch.float32)
+    if max_samples is not None and len(X_test) > max_samples:
+        X_test = X_test[:max_samples]
+        actuals = actuals[:max_samples]
 
-    with torch.no_grad():
-        baseline_predictions = model(X_test_tensor).numpy()
+    print("PFI samples used:", len(X_test))
+    print("PFI batch size:", batch_size)
+
+    baseline_predictions = predict_in_batches(
+        model,
+        X_test,
+        batch_size=batch_size
+    )
 
     baseline_rmse = np.sqrt(
         mean_squared_error(
@@ -229,13 +261,11 @@ def run_pfi_analysis(
         np.random.shuffle(shuffled_values)
         X_permuted[:, :, feature_index] = shuffled_values
 
-        X_permuted_tensor = torch.tensor(
+        permuted_predictions = predict_in_batches(
+            model,
             X_permuted,
-            dtype=torch.float32
+            batch_size=batch_size
         )
-
-        with torch.no_grad():
-            permuted_predictions = model(X_permuted_tensor).numpy()
 
         permuted_rmse = np.sqrt(
             mean_squared_error(
@@ -254,6 +284,9 @@ def run_pfi_analysis(
             f"{feature_name:25s} "
             f"RMSE Increase: {rmse_increase:.6f}"
         )
+
+        del X_permuted, permuted_predictions
+        gc.collect()
 
     pfi_results = sorted(
         pfi_results,
@@ -313,6 +346,47 @@ def run_pfi_analysis(
 
     #plt.show()
     plt.close()
+
+    if len(pfi_results) > 1:
+        zoom_results = pfi_results[1:]
+        zoom_features = [item[0] for item in zoom_results]
+        zoom_importance = [item[1] for item in zoom_results]
+        zoom_colors = [
+            "tab:red" if importance < 0 else "tab:blue"
+            for importance in zoom_importance
+        ]
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.barh(zoom_features, zoom_importance, color=zoom_colors)
+        ax.axvline(0, color="black", linewidth=1)
+        ax.set_xlabel("RMSE Increase After Permutation")
+        ax.set_ylabel("Feature")
+        ax.set_title(
+            "Permutation Feature Importance for CNN-LSTM "
+            "(Zoomed Without Dominant Feature)"
+        )
+        ax.invert_yaxis()
+
+        zoom_min = min(zoom_importance)
+        zoom_max = max(zoom_importance)
+        zoom_x_min = min(0, zoom_min)
+        zoom_x_max = max(0, zoom_max)
+        zoom_padding = max((zoom_x_max - zoom_x_min) * 0.08, 1e-6)
+        ax.set_xlim(
+            zoom_x_min - zoom_padding,
+            zoom_x_max + zoom_padding
+        )
+
+        plt.tight_layout()
+
+        zoom_save_path = os.path.join(
+            results_dir,
+            "pfi",
+            "pfi_feature_importance_cnn_lstm_zoom.png"
+        )
+        plt.savefig(zoom_save_path, dpi=300)
+        print("Saved zoomed PFI plot:", zoom_save_path)
+        plt.close()
 
     return pfi_results
 #============================== END:PFI FOR CNN-LSTM ===============================

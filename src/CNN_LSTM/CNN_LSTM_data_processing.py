@@ -8,8 +8,13 @@ from sklearn.preprocessing import MinMaxScaler
 def add_time_features(df):
     df = df.copy()
 
-    hour = df.index.hour
-    dayofweek = df.index.dayofweek
+    if "timestamp" in df.columns:
+        timestamps = pd.to_datetime(df["timestamp"])
+    else:
+        timestamps = pd.Series(pd.to_datetime(df.index), index=df.index)
+
+    hour = timestamps.dt.hour
+    dayofweek = timestamps.dt.dayofweek
 
     df["hour_sin"] = np.sin(2 * np.pi * hour / 24)
     df["hour_cos"] = np.cos(2 * np.pi * hour / 24)
@@ -30,32 +35,61 @@ def preprocess_data(
 ):
     df = df.copy()
 
-    print("\n========== PREPROCESSING ==========")
-    print("Raw dataset shape:", df.shape)
+    print("\n========== Feature Selecting ==========")
 
-    print(
-        "\nStations available:",
-        sorted(df[station_column].unique().tolist())
+    if "timestamp" not in df.columns:
+        df["timestamp"] = df.index
+    df = df.reset_index(drop=True)
+
+    sensor_features = [
+        column for column in base_features
+        if column in df.columns
+    ]
+
+    # Station 6 is removed to match the N-BEATS preprocessing pipeline.
+    df = df[df[station_column] != 6].copy()
+    df = df[sensor_features + ["timestamp", station_column]]
+    print(df.shape)
+
+    resample_label = (
+        "15 Minutes"
+        if str(resample_time).lower() == "15min"
+        else resample_time
     )
-
-    df = add_time_features(df)
-    df = df[base_features + [station_column]]
-
-    print("\nSelected features:")
-    print(base_features)
-    print("\nAfter feature selection:", df.shape)
-
+    print(f"\n========== Data Resampling with {resample_label} ==========")
     df = (
-        df.groupby(station_column)
+        df
+        .sort_values([station_column, "timestamp"])
+        .set_index("timestamp")
+        .groupby(station_column)
+        [sensor_features]
         .resample(resample_time)
         .mean()
-        .drop(columns=station_column, errors="ignore")
-        .reset_index(level=0)
+        .reset_index()
     )
 
-    print(f"\nAfter {resample_time} resampling:", df.shape)
+    df[sensor_features] = (
+        df
+        .groupby(station_column)[sensor_features]
+        .transform(lambda x: x.interpolate(method="linear").ffill().bfill())
+    )
 
-    return df[base_features + [station_column]]
+    # Match the usable rows after the N-BEATS 15-minute-ahead step without
+    # adding a separate ahead target column. CNN-LSTM creates multi-step
+    # targets during window generation.
+    df = (
+        df
+        .sort_values([station_column, "timestamp"])
+        .groupby(station_column, group_keys=False)
+        .head(-1)
+        .reset_index(drop=True)
+    )
+
+    print(df.shape)
+
+    df = add_time_features(df)
+
+    return df[base_features + ["timestamp", station_column]]
 
 
 def train_val_test_spliting(
@@ -65,7 +99,7 @@ def train_val_test_spliting(
     val_ratio=0.15,
     test_ratio=0.15
 ):
-    print("\n========== TRAIN, VALIDATION AND TEST SPLIT ==========")
+    print("\n========== Train, Validation and Test ==========")
 
     feature_df = feature_df.copy()
 
@@ -101,29 +135,6 @@ def train_val_test_spliting(
         val_parts.append(station_val)
         test_parts.append(station_test)
 
-        print(f"\nStation {station_id}")
-        print(
-            f"Train: "
-            f"{station_train['timestamp'].min()} "
-            f"-> "
-            f"{station_train['timestamp'].max()} "
-            f"Shape: {station_train.shape}"
-        )
-        print(
-            f"Validation: "
-            f"{station_val['timestamp'].min()} "
-            f"-> "
-            f"{station_val['timestamp'].max()} "
-            f"Shape: {station_val.shape}"
-        )
-        print(
-            f"Test: "
-            f"{station_test['timestamp'].min()} "
-            f"-> "
-            f"{station_test['timestamp'].max()} "
-            f"Shape: {station_test.shape}"
-        )
-
     train_df = pd.concat(train_parts).sort_values(
         [station_column, "timestamp"]
     ).reset_index(drop=True)
@@ -136,12 +147,12 @@ def train_val_test_spliting(
 
     total_rows = len(feature_df)
 
-    print("\nOverall Train shape:", train_df.shape)
-    print("Overall Validation shape:", val_df.shape)
-    print("Overall Test shape:", test_df.shape)
+    print("Train shape:", train_df.shape)
+    print("Val shape:", val_df.shape)
+    print("Test shape:", test_df.shape)
 
     print("Train percentage:", len(train_df) / total_rows * 100)
-    print("Validation percentage:", len(val_df) / total_rows * 100)
+    print("Val percentage:", len(val_df) / total_rows * 100)
     print("Test percentage:", len(test_df) / total_rows * 100)
 
     split_counts = pd.concat(
@@ -159,54 +170,65 @@ def train_val_test_spliting(
     return train_df, val_df, test_df
 
 
-def drop_short_stations_for_windowing(
-    feature_df,
-    station_column,
-    input_seq_length,
-    output_seq_length
-):
-    required_rows = input_seq_length + output_seq_length + 1
-    station_counts = feature_df.groupby(station_column).size()
-    keep_station_ids = station_counts[
-        station_counts >= required_rows
-    ].index.tolist()
-    dropped_station_ids = station_counts[
-        station_counts < required_rows
-    ].index.tolist()
+# Reference only. This pre-split station filter is disabled so CNN-LSTM
+# preprocessing matches the N-BEATS row counts. Window creation still skips
+# individual continuous segments that are too short.
+# def drop_short_stations_for_windowing(
+#     feature_df,
+#     station_column,
+#     input_seq_length,
+#     output_seq_length
+# ):
+#     feature_df = feature_df.copy()
+#
+#     if "timestamp" not in feature_df.columns:
+#         feature_df["timestamp"] = feature_df.index
+#
+#     required_rows = input_seq_length + output_seq_length + 1
+#     station_counts = feature_df.groupby(station_column).size()
+#     keep_station_ids = station_counts[
+#         station_counts >= required_rows
+#     ].index.tolist()
+#     dropped_station_ids = station_counts[
+#         station_counts < required_rows
+#     ].index.tolist()
+#
+#     print("\n========== SHORT STATION FILTER ==========")
+#     print("Required rows per station:", required_rows)
+#     print("Stations kept:", keep_station_ids)
+#     print("Stations removed:", dropped_station_ids)
+#
+#     if len(keep_station_ids) == 0:
+#         raise ValueError(
+#             "No station has enough rows for the selected input/output window."
+#         )
+#
+#     return (
+#         feature_df[feature_df[station_column].isin(keep_station_ids)]
+#         .copy()
+#         .reset_index(drop=True)
+#     )
 
-    print("\n========== SHORT STATION FILTER ==========")
-    print("Required rows per station:", required_rows)
-    print("Stations kept:", keep_station_ids)
-    print("Stations removed:", dropped_station_ids)
 
-    if len(keep_station_ids) == 0:
-        raise ValueError(
-            "No station has enough rows for the selected input/output window."
-        )
-
-    return (
-        feature_df[feature_df[station_column].isin(keep_station_ids)]
-        .copy()
-        .reset_index(drop=True)
-    )
-
-
-def fill_short_feature_gaps(series, max_fill_steps):
-    if max_fill_steps <= 0 or not series.isna().any():
-        return series
-
-    missing_mask = series.isna()
-    run_ids = missing_mask.ne(missing_mask.shift()).cumsum()
-    missing_run_lengths = missing_mask.groupby(run_ids).transform("sum")
-    short_gap_mask = missing_mask & (
-        missing_run_lengths <= max_fill_steps
-    )
-
-    nearby_values = series.ffill().bfill()
-    filled_series = series.copy()
-    filled_series.loc[short_gap_mask] = nearby_values.loc[short_gap_mask]
-
-    return filled_series
+# Reference only. This limited gap-fill helper is not used in the active
+# N-BEATS-matched preprocessing path, where missing values are handled by
+# station-wise interpolation after resampling.
+# def fill_short_feature_gaps(series, max_fill_steps):
+#     if max_fill_steps <= 0 or not series.isna().any():
+#         return series
+#
+#     missing_mask = series.isna()
+#     run_ids = missing_mask.ne(missing_mask.shift()).cumsum()
+#     missing_run_lengths = missing_mask.groupby(run_ids).transform("sum")
+#     short_gap_mask = missing_mask & (
+#         missing_run_lengths <= max_fill_steps
+#     )
+#
+#     nearby_values = series.ffill().bfill()
+#     filled_series = series.copy()
+#     filled_series.loc[short_gap_mask] = nearby_values.loc[short_gap_mask]
+#
+#     return filled_series
 
 
 def fill_missing_dataframe(
@@ -218,64 +240,58 @@ def fill_missing_dataframe(
     resample_time,
     max_fill_steps
 ):
-    cleaned_parts = []
-    input_features = [col for col in base_features if col != target_column]
+    print("\n========== Missing Values ==========")
+    df = df.copy()
+    df = df.sort_values([station_column, "timestamp"]).reset_index(drop=True)
+
+    columns_to_fill = [
+        column for column in ["bme688_gas_resistance", "bme688_pressure"]
+        if column in df.columns
+    ]
+
+    if columns_to_fill:
+        df[columns_to_fill] = (
+            df
+            .groupby(station_column)[columns_to_fill]
+            .transform(lambda x: x.interpolate(method="linear"))
+        )
+        df[columns_to_fill] = (
+            df
+            .groupby(station_column)[columns_to_fill]
+            .ffill()
+            .bfill()
+        )
+
+    print(df.shape)
+
+    return df
+
+
+def add_continuous_segments(
+    df,
+    station_column,
+    segment_column,
+    resample_time
+):
+    segmented_parts = []
     expected_interval = pd.Timedelta(resample_time)
     expected_interval_seconds = expected_interval.total_seconds()
 
     for station_id, station_df in df.groupby(station_column, sort=True):
-        station_df = station_df.copy()
-        station_df["timestamp"] = pd.to_datetime(
-            station_df["timestamp"],
-            errors="coerce"
-        )
         station_df = (
             station_df
-            .dropna(subset=["timestamp"])
-            .sort_values("timestamp")
             .copy()
+            .sort_values("timestamp")
+            .reset_index(drop=True)
         )
 
-        print(f"\nMissing values before limited filling (Station {station_id}):")
-        print(station_df.isna().sum().sum())
+        timestamp_differences = station_df["timestamp"].diff()
+        gap_seconds = timestamp_differences.dt.total_seconds().fillna(0)
+        gap_mask = gap_seconds > expected_interval_seconds
+        station_df[segment_column] = gap_mask.cumsum().astype(int)
+        segmented_parts.append(station_df)
 
-        station_df = station_df.dropna(subset=[target_column])
-        station_df[input_features] = (
-            station_df[input_features]
-            .apply(
-                fill_short_feature_gaps,
-                max_fill_steps=max_fill_steps
-            )
-        )
-        station_df = station_df.dropna()
-
-        print(f"Missing values after limited filling (Station {station_id}):")
-        print(station_df.isna().sum().sum())
-
-        if len(station_df) > 0:
-            timestamp_differences = station_df["timestamp"].diff()
-            gap_seconds = (
-                timestamp_differences
-                .dt.total_seconds()
-                .fillna(0)
-            )
-            gap_mask = gap_seconds > expected_interval_seconds
-            station_df[segment_column] = gap_mask.cumsum().astype(int)
-
-            detected_gaps = int(gap_mask.sum())
-            segment_count = int(station_df[segment_column].nunique())
-            maximum_gap = pd.to_timedelta(gap_seconds.max(), unit="s")
-
-            print(f"Detected timestamp gaps (Station {station_id}): {detected_gaps}")
-            print(f"Continuous segments (Station {station_id}): {segment_count}")
-            print(f"Largest timestamp difference (Station {station_id}): {maximum_gap}")
-
-            cleaned_parts.append(station_df)
-
-    if len(cleaned_parts) == 0:
-        raise ValueError("No rows left after missing-value handling.")
-
-    return pd.concat(cleaned_parts).sort_values(
+    return pd.concat(segmented_parts).sort_values(
         [station_column, "timestamp"]
     ).reset_index(drop=True)
 
@@ -291,34 +307,28 @@ def add_station_features(df, station_ids, station_column):
     return df
 
 
-def clip_outliers_from_train(
-    train_df,
-    val_df,
-    test_df,
+def clip_outliers_dataframe(
+    feature_df,
     numeric_columns,
     clip_factor
 ):
-    print("\n========== TRAIN-DERIVED OUTLIER CLIPPING ==========")
+    print("\n========== Clipping Outliers ==========")
     print("Clip factor:", clip_factor)
 
-    train_df = train_df.copy()
-    val_df = val_df.copy()
-    test_df = test_df.copy()
+    feature_df = feature_df.copy()
 
     for column in numeric_columns:
-        q1 = train_df[column].quantile(0.25)
-        q3 = train_df[column].quantile(0.75)
+        q1 = feature_df[column].quantile(0.25)
+        q3 = feature_df[column].quantile(0.75)
         iqr = q3 - q1
         lower = q1 - clip_factor * iqr
         upper = q3 + clip_factor * iqr
 
-        print(f"{column}: lower={lower:.6f}, upper={upper:.6f}")
+        feature_df[column] = feature_df[column].clip(lower=lower, upper=upper)
 
-        train_df[column] = train_df[column].clip(lower=lower, upper=upper)
-        val_df[column] = val_df[column].clip(lower=lower, upper=upper)
-        test_df[column] = test_df[column].clip(lower=lower, upper=upper)
+    print(feature_df.shape)
 
-    return train_df, val_df, test_df
+    return feature_df
 
 
 def scale_data(train_df, val_df, test_df, model_features, target_column):
@@ -326,7 +336,8 @@ def scale_data(train_df, val_df, test_df, model_features, target_column):
 
     scaler.fit(train_df[model_features])
 
-    print("\nScaler fitted ONLY on training data.")
+    print("\n========== Min Max Scaling ==========")
+    print("Scaler fitted only on training data.")
 
     train_df = train_df.copy()
     val_df = val_df.copy()
@@ -337,12 +348,12 @@ def scale_data(train_df, val_df, test_df, model_features, target_column):
     test_df[model_features] = scaler.transform(test_df[model_features])
 
     print(
-        "Scaled X train min/max:",
+        "Scaled X min/max:",
         train_df[model_features].min().min(),
         train_df[model_features].max().max()
     )
     print(
-        "Scaled y train min/max:",
+        "Scaled y min/max:",
         train_df[target_column].min(),
         train_df[target_column].max()
     )

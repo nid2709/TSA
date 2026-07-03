@@ -19,25 +19,13 @@ PCA_FEATURES = [
 def load_prepare_data(csv_path="data/indoorAir.csv"):
     df = pd.read_csv(csv_path)
 
-    print("\n========== RAW DATASET ==========")
-    print("Raw dataset shape:", df.shape)
-
-    print("\nColumns:")
-    print(df.columns.tolist())
+    print("\n========== Data Loading ==========")
+    print(df.shape)
 
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
 
     df = df.sort_values(by='timestamp')
     df.set_index('timestamp', inplace=True)
-
-    print("\n========== TIMESTAMP PROCESSING ==========")
-    print("Dataset shape:", df.shape)
-
-    print("\nDate Range:")
-    print("Start:", df.index.min())
-    print("End:", df.index.max())
-
-    print("\nData loaded and Preparation..!")
 
     return df
 

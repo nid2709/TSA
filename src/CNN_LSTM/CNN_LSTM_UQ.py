@@ -12,7 +12,7 @@ import torch
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 
-from src.CNN_LSTM.CNN_LSTM_co2 import get_cnn_lstm_results_dir
+from src.CNN_LSTM.CNN_LSTM_config import get_cnn_lstm_results_dir
 
 
 def enable_dropout_during_inference(model):

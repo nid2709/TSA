@@ -13,18 +13,19 @@ import torch
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 
-from src.CNN_LSTM.CNN_LSTM_co2 import (
-    CNNLSTMModel,
-    train_model,
-    evaluate_model,
-    plot_loss_curves,
-    get_cnn_lstm_results_dir,
+from src.CNN_LSTM.CNN_LSTM_config import (
     DEFAULT_HIDDEN_SIZE,
     DEFAULT_NUM_LAYERS,
     DEFAULT_DROPOUT_RATE,
     DEFAULT_LEARNING_RATE,
     DEFAULT_WEIGHT_DECAY,
     DEFAULT_RESTORE_BEST_MODEL,
+    get_cnn_lstm_results_dir,
+)
+from src.CNN_LSTM.CNN_LSTM_model import (
+    CNNLSTMModel,
+    evaluate_model,
+    train_model,
 )
 
 
@@ -143,7 +144,8 @@ def run_deep_ensemble_uq(
     dropout_rate=DEFAULT_DROPOUT_RATE,
     learning_rate=DEFAULT_LEARNING_RATE,
     weight_decay=DEFAULT_WEIGHT_DECAY,
-    restore_best_model=DEFAULT_RESTORE_BEST_MODEL
+    restore_best_model=DEFAULT_RESTORE_BEST_MODEL,
+    use_attention=False
 ):
     if seeds is None:
         seeds = [11, 22, 33]
@@ -162,6 +164,7 @@ def run_deep_ensemble_uq(
     print("Learning rate:", learning_rate)
     print("Weight decay:", weight_decay)
     print("Restore best validation checkpoint:", restore_best_model)
+    print("Use attention:", use_attention)
 
     for i in range(n_models):
         seed = seeds[i]
@@ -175,7 +178,8 @@ def run_deep_ensemble_uq(
             output_seq_length=output_seq_length,
             hidden_size=hidden_size,
             num_layers=num_layers,
-            dropout=dropout_rate
+            dropout=dropout_rate,
+            use_attention=use_attention
         )
 
         model, train_losses, val_losses = train_model(
