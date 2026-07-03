@@ -3,6 +3,9 @@ import time
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MPL_CONFIG_DIR = os.path.join(BASE_DIR, ".matplotlib")
+os.makedirs(MPL_CONFIG_DIR, exist_ok=True)
+os.environ.setdefault("MPLCONFIGDIR", MPL_CONFIG_DIR)
 
 from src.CNN_LSTM.dataLoad import (
     load_prepare_data,
@@ -95,6 +98,11 @@ def run_pipeline():
         format_elapsed_time(explainability_elapsed_time)
     )
 
-    # Uncertainty Quantifiers
-    print("\n========== RUNNING MONTE CARLO DROPOUT ==========")
-    uq_start_time = time.perf_counter()
+    pipeline_elapsed_time = time.perf_counter() - pipeline_start_time
+
+    print("\n========== PIPELINE FINISHED ==========")
+    print("Total pipeline runtime:", format_elapsed_time(pipeline_elapsed_time))
+
+
+if __name__ == "__main__":
+    run_pipeline()
