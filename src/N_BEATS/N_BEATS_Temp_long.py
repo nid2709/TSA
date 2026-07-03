@@ -10,15 +10,9 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.preprocessing import MinMaxScaler
 from torch.utils.data import DataLoader, TensorDataset
 
-try:
-    from kymatio.scattering1d.frontend.numpy_frontend import ScatteringNumPy1D as Scattering1D
-except ImportError as e:
-    print("Kymatio 1D import error:", e)
-    Scattering1D = None
 
-
-HISTORY_DAYS = 5
-PREDICTION_HOURS = 2
+HISTORY_DAYS = 10
+PREDICTION_HOURS = 12
 RESAMPLE_FREQ = "15min"
 
 STEPS_PER_HOUR = int(pd.Timedelta(hours=1) / pd.Timedelta(RESAMPLE_FREQ))
@@ -33,13 +27,6 @@ num_layers = 2
 batch_size = 128
 num_epochs = 50
 weight_decay = 1e-4
-
-# WaveletTransformation
-USE_SCATTERING = True
-SCATTERING_J = 5
-SCATTERING_Q = 8
-N_SCATTERING_FEATURES = 24
-SCATTERING_SIGNAL_COL = "scd41_co2"
 
 
 def train_val_test_spliting(feature_df):
@@ -99,47 +86,10 @@ def train_val_test_spliting(feature_df):
     return train_df, val_df, test_df
 
 
-def build_scattering_transform():
-    if Scattering1D is None:
-        raise ImportError(
-            "Kymatio is required for scattering wavelet features. "
-            "Install it with: pip install kymatio"
-        )
-
-    return Scattering1D(
-        J=SCATTERING_J,
-        shape=input_size,
-        Q=SCATTERING_Q,
-    )
-
-
-def compute_static_scattering_features(signal_window, scattering_transform):
-    signal_window = np.asarray(signal_window, dtype=np.float32)
-
-    scattering_coefficients = scattering_transform(signal_window)
-    scattering_coefficients = np.asarray(scattering_coefficients)
-
-    if scattering_coefficients.ndim == 2:
-        static_vector = scattering_coefficients.mean(axis=1)
-    else:
-        static_vector = scattering_coefficients.reshape(-1)
-
-    static_vector = static_vector[:N_SCATTERING_FEATURES]
-
-    if len(static_vector) < N_SCATTERING_FEATURES:
-        static_vector = np.pad(
-            static_vector,
-            (0, N_SCATTERING_FEATURES - len(static_vector)),
-            mode="constant",
-        )
-
-    return static_vector.astype(np.float32)
-
-
 def min_max_scaler(feature_df, train_df, val_df, test_df):
     print("\n========== Min Max Scaling ==========")
 
-    target_col = "target_co2_15min"
+    target_col = "target_temperature_15min"
 
     feature_cols = [
         col for col in feature_df.columns
@@ -183,119 +133,54 @@ def min_max_scaler(feature_df, train_df, val_df, test_df):
     )
 
 
-def create_windows(
-    data,
-    feature_cols,
-    target_col="target_co2_15min",
-    scattering_transform=None,
-):
+def create_windows(data, feature_cols, target_col="target_temperature_15min"):
     X_windows = []
-    static_windows = []
     y_windows = []
 
     data = data.sort_values(["station_id", "timestamp"])
-
-    signal_idx = feature_cols.index(SCATTERING_SIGNAL_COL)
 
     for station_id, station_data in data.groupby("station_id"):
         X = station_data[feature_cols].values.astype("float32")
         y = station_data[target_col].values.astype("float32")
 
         for i in range(input_size, len(station_data) - horizon + 2):
-            input_window = X[i - input_size:i]
-
-            X_windows.append(input_window)
+            X_windows.append(X[i - input_size:i])
             y_windows.append(y[i - 1:i - 1 + horizon])
 
-            if USE_SCATTERING:
-                if scattering_transform is None:
-                    raise ValueError(
-                        "scattering_transform must be provided when "
-                        "USE_SCATTERING=True"
-                    )
-
-                signal_window = input_window[:, signal_idx]
-
-                static_features = compute_static_scattering_features(
-                    signal_window,
-                    scattering_transform,
-                )
-            else:
-                static_features = np.zeros(0, dtype=np.float32)
-
-            static_windows.append(static_features)
-
-    return (
-        np.array(X_windows, dtype="float32"),
-        np.array(static_windows, dtype="float32"),
-        np.array(y_windows, dtype="float32"),
-    )
+    return np.array(X_windows, dtype="float32"), np.array(y_windows, dtype="float32")
 
 
 def window_creation(train_df_scaled, val_df_scaled, test_df_scaled, feature_cols, target_col):
     print("\n========== Creating Windows ==========")
-    print("Use scattering features:", USE_SCATTERING)
 
-    scattering_transform = build_scattering_transform() if USE_SCATTERING else None
+    X_train, y_train = create_windows(train_df_scaled, feature_cols, target_col)
+    X_val, y_val = create_windows(val_df_scaled, feature_cols, target_col)
+    X_test, y_test = create_windows(test_df_scaled, feature_cols, target_col)
 
-    X_train, S_train, y_train = create_windows(
-        train_df_scaled,
-        feature_cols,
-        target_col,
-        scattering_transform,
-    )
+    print("X_train:", X_train.shape, "y_train:", y_train.shape)
+    print("X_val:", X_val.shape, "y_val:", y_val.shape)
+    print("X_test:", X_test.shape, "y_test:", y_test.shape)
 
-    X_val, S_val, y_val = create_windows(
-        val_df_scaled,
-        feature_cols,
-        target_col,
-        scattering_transform,
-    )
-
-    X_test, S_test, y_test = create_windows(
-        test_df_scaled,
-        feature_cols,
-        target_col,
-        scattering_transform,
-    )
-
-    print("X_train:", X_train.shape, "S_train:", S_train.shape, "y_train:", y_train.shape)
-    print("X_val:", X_val.shape, "S_val:", S_val.shape, "y_val:", y_val.shape)
-    print("X_test:", X_test.shape, "S_test:", S_test.shape, "y_test:", y_test.shape)
-
-    return X_train, S_train, y_train, X_val, S_val, y_val, X_test, S_test, y_test
+    return X_train, y_train, X_val, y_val, X_test, y_test
 
 
-def tensor_and_dataloader(
-    X_train,
-    S_train,
-    y_train,
-    X_val,
-    S_val,
-    y_val,
-    X_test,
-    S_test,
-    y_test,
-):
+def tensor_and_dataloader(X_train, y_train, X_val, y_val, X_test, y_test):
     print("\n========== Tensor and DataLoader ==========")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
-    S_train_tensor = torch.tensor(S_train, dtype=torch.float32)
     y_train_tensor = torch.tensor(y_train, dtype=torch.float32)
 
     X_val_tensor = torch.tensor(X_val, dtype=torch.float32)
-    S_val_tensor = torch.tensor(S_val, dtype=torch.float32)
     y_val_tensor = torch.tensor(y_val, dtype=torch.float32)
 
     X_test_tensor = torch.tensor(X_test, dtype=torch.float32)
-    S_test_tensor = torch.tensor(S_test, dtype=torch.float32)
     y_test_tensor = torch.tensor(y_test, dtype=torch.float32)
 
-    train_dataset = TensorDataset(X_train_tensor, S_train_tensor, y_train_tensor)
-    val_dataset = TensorDataset(X_val_tensor, S_val_tensor, y_val_tensor)
-    test_dataset = TensorDataset(X_test_tensor, S_test_tensor, y_test_tensor)
+    train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
+    val_dataset = TensorDataset(X_val_tensor, y_val_tensor)
+    test_dataset = TensorDataset(X_test_tensor, y_test_tensor)
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
@@ -359,14 +244,12 @@ class NBeats(nn.Module):
         num_layers=2,
         horizon=8,
         dropout=0.25,
-        static_dim=0,
         block_cls=NBeatsBlock,
         block_kwargs=None,
     ):
         super(NBeats, self).__init__()
 
-        self.input_dim = input_size * num_features + static_dim
-        self.static_dim = static_dim
+        self.input_dim = input_size * num_features
         self.horizon = horizon
         block_kwargs = block_kwargs or {}
 
@@ -384,14 +267,10 @@ class NBeats(nn.Module):
             ]
         )
 
-    def forward(self, x, static_features=None):
+    def forward(self, x):
         x = x.reshape(x.size(0), -1)
 
-        if static_features is not None and static_features.numel() > 0:
-            x = torch.cat([x, static_features], dim=1)
-
         residual = x
-
         forecast = torch.zeros(
             x.size(0),
             self.horizon,
@@ -406,11 +285,10 @@ class NBeats(nn.Module):
         return forecast
 
 
-def build_model(model_class, X_train, S_train, device):
+def build_model(model_class, X_train, device):
     print("\n========== Model Building ==========")
 
     num_features = X_train.shape[2]
-    static_dim = S_train.shape[1] if USE_SCATTERING else 0
 
     model = model_class(
         input_size=input_size,
@@ -420,7 +298,6 @@ def build_model(model_class, X_train, S_train, device):
         num_layers=num_layers,
         horizon=horizon,
         dropout=dropout,
-        static_dim=static_dim,
     )
 
     model = model.to(device)
@@ -458,14 +335,13 @@ def train_model(model_name, model, train_loader, val_loader, device):
         model.train()
         running_train_loss = 0.0
 
-        for X_batch, S_batch, y_batch in train_loader:
+        for X_batch, y_batch in train_loader:
             X_batch = X_batch.to(device)
-            S_batch = S_batch.to(device)
             y_batch = y_batch.to(device)
 
             optimizer.zero_grad()
 
-            y_pred = model(X_batch, S_batch)
+            y_pred = model(X_batch)
             loss = criterion(y_pred, y_batch)
 
             loss.backward()
@@ -482,12 +358,11 @@ def train_model(model_name, model, train_loader, val_loader, device):
         running_val_loss = 0.0
 
         with torch.no_grad():
-            for X_batch, S_batch, y_batch in val_loader:
+            for X_batch, y_batch in val_loader:
                 X_batch = X_batch.to(device)
-                S_batch = S_batch.to(device)
                 y_batch = y_batch.to(device)
 
-                y_pred = model(X_batch, S_batch)
+                y_pred = model(X_batch)
                 loss = criterion(y_pred, y_batch)
 
                 running_val_loss += loss.item()
@@ -543,11 +418,10 @@ def predict_model(model, test_loader, device):
     test_actuals = []
 
     with torch.no_grad():
-        for X_batch, S_batch, y_batch in test_loader:
+        for X_batch, y_batch in test_loader:
             X_batch = X_batch.to(device)
-            S_batch = S_batch.to(device)
 
-            y_pred = model(X_batch, S_batch)
+            y_pred = model(X_batch)
 
             test_predictions.append(y_pred.cpu().numpy())
             test_actuals.append(y_batch.numpy())
@@ -618,7 +492,7 @@ def evaluate_model(result, test_loader, device, y_scaler):
     print("Metrics WITHOUT inverse scaling")
     print(pd.Series(metrics_scaled))
 
-    print("\nMetrics WITH inverse scaling in original CO2 scale")
+    print("\nMetrics WITH inverse scaling in original temperature scale")
     print(pd.Series(metrics_original))
 
     return result, metrics_scaled, metrics_original
@@ -637,23 +511,23 @@ def graph_prediction(result, model_name="N-BEATS"):
 
     plt.plot(
         actuals[:plot_points, forecast_step],
-        label="Actual CO2",
+        label="Actual Temperature",
     )
 
     plt.plot(
         predictions[:plot_points, forecast_step],
-        label=f"{model_name} Predicted CO2",
+        label=f"{model_name} Predicted Temperature",
     )
 
     plt.xlabel("Test sample")
-    plt.ylabel("CO2")
-    plt.title(f"{model_name} CO2 Prediction")
+    plt.ylabel("Temperature")
+    plt.title(f"{model_name} Temperature Prediction")
     plt.legend()
     plt.grid(True)
     plt.show()
 
 
-def model_pipeline_nbeats_wavelet(feature_df):
+def model_pipeline_Temp_long(feature_df):
     train_df, val_df, test_df = train_val_test_spliting(feature_df)
 
     (
@@ -671,7 +545,7 @@ def model_pipeline_nbeats_wavelet(feature_df):
         test_df,
     )
 
-    X_train, S_train, y_train, X_val, S_val, y_val, X_test, S_test, y_test = window_creation(
+    X_train, y_train, X_val, y_val, X_test, y_test = window_creation(
         train_df_scaled,
         val_df_scaled,
         test_df_scaled,
@@ -681,27 +555,24 @@ def model_pipeline_nbeats_wavelet(feature_df):
 
     train_loader, val_loader, test_loader, device = tensor_and_dataloader(
         X_train,
-        S_train,
         y_train,
         X_val,
-        S_val,
         y_val,
         X_test,
-        S_test,
         y_test,
     )
 
-    model = build_model(NBeats, X_train, S_train, device)
+    model = build_model(NBeats, X_train, device)
 
     result = train_model(
-        "N-BEATS",
+        "N-BEATS Temperature",
         model,
         train_loader,
         val_loader,
         device,
     )
 
-    graph_training_losses(result, "N-BEATS")
+    graph_training_losses(result, "N-BEATS Temperature")
 
     result, metrics_scaled, metrics_original = evaluate_model(
         result,
@@ -710,7 +581,7 @@ def model_pipeline_nbeats_wavelet(feature_df):
         y_scaler,
     )
 
-    graph_prediction(result, "N-BEATS")
+    graph_prediction(result, "N-BEATS Temperature")
 
     return {
         "result": result,
