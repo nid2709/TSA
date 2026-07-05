@@ -19,9 +19,12 @@ from src.CNN_LSTM.CNN_LSTM_co2 import (
     DEFAULT_OUTPUT_SEQ_LENGTH,
     DEFAULT_MAX_FILL_STEPS
 )
-from src.CNN_LSTM.CNN_LSTM_UQ import run_mc_dropout_uq
-from src.CNN_LSTM.CNN_LSTM_DeepEnsemble import run_deep_ensemble_uq
-from src.CNN_LSTM.CNN_LSTM_explainability import run_shap_experiment
+
+
+RUN_EXPLAINABILITY = True
+RUN_MC_DROPOUT = True
+RUN_DEEP_ENSEMBLE = True
+SAVE_EDA_PLOTS = False
 
 
 def format_elapsed_time(seconds):
@@ -44,11 +47,6 @@ def run_pipeline():
     csv_path = os.path.join(BASE_DIR, "data", "indoorAir2.csv")
 
     df = load_prepare_data(csv_path)
-
-    # Optional analysis plots
-    # plot_time_series(df)
-    # plot_heatmap(df)
-    # plot_pca_analysis(df)
 
     # Train CNN-LSTM and keep returned values needed for Explainability techniques.
     # CNN_LSTM_explainability.py uses model, X_train, X_test, actuals, and features.
@@ -82,21 +80,77 @@ def run_pipeline():
     print("Results directory:", cnn_results["results_dir"])
     print("CNN-LSTM runtime:", cnn_results["training_runtime_formatted"])
 
-    # Explainability techniques - saves SHAP, PFI and Integrated Gradients images
-    # using the already trained CNN-LSTM model.
-    explainability_start_time = time.perf_counter()
-    explainability_results = run_shap_experiment(
-        cnn_results
-    )
-    explainability_elapsed_time = (
-        time.perf_counter() - explainability_start_time
-    )
+    if SAVE_EDA_PLOTS:
+        print("\n========== SAVING EDA PLOTS ==========")
+        plot_time_series(
+            df,
+            results_dir=cnn_results["results_dir"],
+            target_column=cnn_results["target_column"],
+            target_label=cnn_results["target_label"]
+        )
+        plot_heatmap(df, results_dir=cnn_results["results_dir"])
+        plot_pca_analysis(df, results_dir=cnn_results["results_dir"])
+    else:
+        print(
+            "\nEDA plots skipped. Set SAVE_EDA_PLOTS=True to save all EDA plots."
+        )
 
-    print("\n========== EXPLAINABILITY FINISHED ==========")
-    print(
-        "Explainability runtime:",
-        format_elapsed_time(explainability_elapsed_time)
-    )
+    if RUN_EXPLAINABILITY:
+        from src.CNN_LSTM.CNN_LSTM_explainability import run_shap_experiment
+
+        explainability_start_time = time.perf_counter()
+        run_shap_experiment(cnn_results)
+        explainability_elapsed_time = (
+            time.perf_counter() - explainability_start_time
+        )
+
+        print("\n========== EXPLAINABILITY FINISHED ==========")
+        print(
+            "Explainability runtime:",
+            format_elapsed_time(explainability_elapsed_time)
+        )
+    else:
+        print("\nExplainability skipped. Set RUN_EXPLAINABILITY=True to run SHAP/PFI/IG.")
+
+    if RUN_MC_DROPOUT:
+        from src.CNN_LSTM.CNN_LSTM_UQ import run_mc_dropout_uq
+
+        mc_start_time = time.perf_counter()
+        run_mc_dropout_uq(cnn_results)
+        mc_elapsed_time = time.perf_counter() - mc_start_time
+
+        print("\n========== MC DROPOUT FINISHED ==========")
+        print("MC Dropout runtime:", format_elapsed_time(mc_elapsed_time))
+    else:
+        print("MC Dropout skipped. Set RUN_MC_DROPOUT=True to run it.")
+
+    if RUN_DEEP_ENSEMBLE:
+        from src.CNN_LSTM.CNN_LSTM_DeepEnsemble import run_deep_ensemble_uq
+
+        ensemble_start_time = time.perf_counter()
+        run_deep_ensemble_uq(
+            cnn_results["train_loader"],
+            cnn_results["val_loader"],
+            cnn_results["test_loader"],
+            cnn_results["input_size"],
+            cnn_results["actuals"],
+            cnn_results["output_seq_length"],
+            target_label=cnn_results["target_label"],
+            results_dir=cnn_results["results_dir"],
+            hidden_size=cnn_results["hidden_size"],
+            num_layers=cnn_results["num_layers"],
+            dropout_rate=cnn_results["dropout_rate"],
+            learning_rate=cnn_results["learning_rate"],
+            weight_decay=cnn_results["weight_decay"],
+            restore_best_model=cnn_results["restore_best_model"],
+            use_attention=cnn_results["use_attention"]
+        )
+        ensemble_elapsed_time = time.perf_counter() - ensemble_start_time
+
+        print("\n========== DEEP ENSEMBLE FINISHED ==========")
+        print("Deep Ensemble runtime:", format_elapsed_time(ensemble_elapsed_time))
+    else:
+        print("Deep Ensemble skipped. Set RUN_DEEP_ENSEMBLE=True to run it.")
 
     pipeline_elapsed_time = time.perf_counter() - pipeline_start_time
 

@@ -1,5 +1,6 @@
 import os
 
+#To prevent temporary config/cache files
 MPL_CONFIG_DIR = os.path.join(
     os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")),
     ".matplotlib"
@@ -26,15 +27,15 @@ TARGET = 'scd41_co2'
 STATION_COLUMN = 'station_id'
 SEGMENT_COLUMN = '_continuous_segment_id'
 
-DEFAULT_INPUT_SEQ_LENGTH = 288
-DEFAULT_OUTPUT_SEQ_LENGTH = 16
+DEFAULT_INPUT_SEQ_LENGTH = 672
+DEFAULT_OUTPUT_SEQ_LENGTH = 48
 DEFAULT_BATCH_SIZE = 64
-DEFAULT_EPOCHS = 15
-DEFAULT_LEARNING_RATE = 0.00005
+DEFAULT_EPOCHS = 12
+DEFAULT_LEARNING_RATE = 0.000015
 DEFAULT_HIDDEN_SIZE = 128
 DEFAULT_RESAMPLE_TIME = '15min'
-DEFAULT_DROPOUT_RATE = 0.2
-DEFAULT_WEIGHT_DECAY = 1e-4
+DEFAULT_DROPOUT_RATE = 0.3
+DEFAULT_WEIGHT_DECAY = 5e-4
 DEFAULT_NUM_LAYERS = 2
 
 DEFAULT_MAX_FILL_STEPS = 2
@@ -49,9 +50,6 @@ DEFAULT_SCATTERING_J = 4
 DEFAULT_SCATTERING_Q = 8
 DEFAULT_N_SCATTERING_FEATURES = 8
 DEFAULT_USE_ATTENTION = False
-
-# Backward-compatible name used by older scripts.
-conv_channels = DEFAULT_CONV_CHANNELS
 
 
 def get_target_label(target_column):

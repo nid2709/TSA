@@ -27,7 +27,6 @@ from src.CNN_LSTM.CNN_LSTM_config import (
     SEGMENT_COLUMN,
     STATION_COLUMN,
     TARGET,
-    conv_channels,
     format_elapsed_time,
     get_cnn_lstm_results_dir,
     get_target_label,
@@ -109,7 +108,7 @@ def run_cnn_lstm_model(
     print("Outlier clip factor:", outlier_clip_factor)
     print("Restore best validation checkpoint:", restore_best_model)
     print("Gap-aware sequence generation:", True)
-    print("Convolution channels:", conv_channels)
+    print("Convolution channels:", DEFAULT_CONV_CHANNELS)
     print("Use scattering:", use_scattering)
     print("Use attention:", use_attention)
     if use_scattering:
@@ -265,12 +264,17 @@ def run_cnn_lstm_model(
         "training_runtime_seconds": run_elapsed_time,
         "training_runtime_formatted": format_elapsed_time(run_elapsed_time),
 
-        # ADD THESE for Explainability techniques
+        # Objects reused by optional explainability and uncertainty stages.
+        "train_loader": train_loader,
+        "val_loader": val_loader,
+        "test_loader": test_loader,
         "X_train": X_train,
         "X_test": X_test,
         "model_features": model_features,
         "output_seq_length": output_seq_length,
         "resample_time": resample_time,
+        "epochs": epochs,
+        "batch_size": batch_size,
         "dropout_rate": dropout_rate,
         "learning_rate": learning_rate,
         "hidden_size": hidden_size,
@@ -287,10 +291,5 @@ def run_cnn_lstm_model(
         "scattering_q": scattering_q,
         "n_scattering_features": n_scattering_features,
         "use_attention": use_attention,
-
-        # ADD THESE for Deep Ensemble
-        "train_loader": train_loader,
-        "val_loader": val_loader,
-        "test_loader": test_loader,
         "input_size": input_size,
     }

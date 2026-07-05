@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
+from numpy.lib.stride_tricks import sliding_window_view
 
 import torch
 import torch.nn as nn
@@ -221,7 +222,7 @@ def create_sequences(
     scattering_transform=None,
     n_scattering_features=DEFAULT_N_SCATTERING_FEATURES
 ):
-    X, y = [], []
+    X_parts, y_parts = [], []
     target_index = model_features.index(TARGET)
 
     if SEGMENT_COLUMN not in data.columns:
@@ -240,13 +241,16 @@ def create_sequences(
     )
 
     for (station_id, segment_id), segment_data in grouped_segments:
-        values = segment_data[model_features].values
+        values = np.ascontiguousarray(
+            segment_data[model_features].to_numpy(dtype=np.float32)
+        )
 
         print(
             "\nContinuous segment before sequencing:",
             f"station={station_id}, segment={segment_id}, shape={segment_data.shape}"
         )
         required_length = input_seq_length + output_seq_length
+        created_count = max(0, len(values) - required_length + 1)
 
         if len(values) <= required_length:
             print("\nSkipping sequence generation:")
@@ -256,45 +260,74 @@ def create_sequences(
             print(f"Required minimum rows: {required_length + 1}")
             continue
 
-        for i in range(
-            len(values) - input_seq_length - output_seq_length + 1
-        ):
+        if not use_scattering:
+            input_windows = sliding_window_view(
+                values,
+                window_shape=input_seq_length,
+                axis=0
+            )
+            input_windows = input_windows[:created_count].transpose(0, 2, 1)
+
+            target_values = values[input_seq_length:, target_index]
+            target_windows = sliding_window_view(
+                target_values,
+                window_shape=output_seq_length
+            )[:created_count]
+
+            X_parts.append(
+                np.ascontiguousarray(input_windows, dtype=np.float32)
+            )
+            y_parts.append(
+                np.ascontiguousarray(target_windows, dtype=np.float32)
+            )
+            continue
+
+        for i in range(created_count):
             input_window = values[i:i + input_seq_length]
 
-            if use_scattering:
-                if scattering_transform is None:
-                    raise ValueError(
-                        "scattering_transform must be provided when "
-                        "use_scattering=True"
-                    )
-
-                co2_window = input_window[:, target_index]
-                static_scattering_vector = compute_static_scattering_features(
-                    co2_window,
-                    scattering_transform,
-                    n_scattering_features=n_scattering_features
-                )
-                repeated_scattering = np.repeat(
-                    static_scattering_vector.reshape(1, -1),
-                    input_seq_length,
-                    axis=0
-                )
-                input_window = np.concatenate(
-                    [input_window, repeated_scattering],
-                    axis=1
+            if scattering_transform is None:
+                raise ValueError(
+                    "scattering_transform must be provided when "
+                    "use_scattering=True"
                 )
 
-            X.append(input_window)
-            y.append(
+            co2_window = input_window[:, target_index]
+            static_scattering_vector = compute_static_scattering_features(
+                co2_window,
+                scattering_transform,
+                n_scattering_features=n_scattering_features
+            )
+            repeated_scattering = np.repeat(
+                static_scattering_vector.reshape(1, -1),
+                input_seq_length,
+                axis=0
+            )
+            input_window = np.concatenate(
+                [input_window, repeated_scattering],
+                axis=1
+            )
+
+            X_parts.append(input_window.astype(np.float32, copy=False))
+            y_parts.append(
                 values[
                     i + input_seq_length:
                     i + input_seq_length + output_seq_length,
                     target_index
-                ]
+                ].astype(np.float32, copy=False)
             )
 
-    X = np.array(X)
-    y = np.array(y)
+    if use_scattering:
+        X = np.asarray(X_parts, dtype=np.float32)
+        y = np.asarray(y_parts, dtype=np.float32)
+    elif X_parts:
+        X = np.concatenate(X_parts, axis=0)
+        y = np.concatenate(y_parts, axis=0)
+    else:
+        X = np.empty(
+            (0, input_seq_length, len(model_features)),
+            dtype=np.float32
+        )
+        y = np.empty((0, output_seq_length), dtype=np.float32)
 
     print("Sequence input shape:", X.shape)
     print("Sequence target shape:", y.shape)
@@ -313,8 +346,8 @@ def create_sequences(
 
 
 def create_loader(X, y, batch_size=32, shuffle=False):
-    X = torch.tensor(X, dtype=torch.float32)
-    y = torch.tensor(y, dtype=torch.float32)
+    X = torch.from_numpy(X).float()
+    y = torch.from_numpy(y).float()
 
     loader = DataLoader(TensorDataset(X, y), batch_size=batch_size, shuffle=shuffle)
     sample_X, sample_y = next(iter(loader))
@@ -470,7 +503,10 @@ def prepare_lstm_data(
 
     if use_scattering:
         print("\n========== SCATTERING WAVELET FEATURES ==========")
-        print("Scattering source signal: scaled scd41_co2 input window")
+        print(
+            "Scattering source signal:",
+            f"scaled {TARGET} input window"
+        )
         print("Scattering J:", scattering_j)
         print("Scattering Q:", scattering_q)
         print("Static scattering features:", n_scattering_features)
@@ -893,7 +929,8 @@ def plot_scattering_wavelet_features(
     ]
 
     sample_window = X_train[0]
-    co2_signal = sample_window[:, target_index]
+    target_label = get_target_label(TARGET)
+    target_signal = sample_window[:, target_index]
 
     # Scattering features are static within a sequence, so the first timestep
     # contains the same coefficient values supplied at every timestep.
@@ -907,14 +944,14 @@ def plot_scattering_wavelet_features(
     )
 
     axes[0].plot(
-        np.arange(len(co2_signal)),
-        co2_signal,
+        np.arange(len(target_signal)),
+        target_signal,
         color="tab:blue",
         linewidth=1.8
     )
     axes[0].set_title("Representative Input Window")
     axes[0].set_xlabel("Input timestep")
-    axes[0].set_ylabel("Scaled CO2")
+    axes[0].set_ylabel(f"Scaled {target_label}")
     axes[0].grid(alpha=0.25)
 
     feature_labels = [
@@ -979,10 +1016,14 @@ def plot_predictions(
     ax.plot(x_values, actual_values, label="Actual")
     ax.plot(x_values, predicted_values, label="Predicted")
     ax.set_xlabel("Test sample index")
-    ax.set_ylabel("Scaled CO2")
+    target_label = get_target_label(TARGET)
+    ax.set_ylabel(f"Scaled {target_label}")
     ax.xaxis.set_major_locator(MaxNLocator(nbins=8, integer=True))
     ax.legend()
-    ax.set_title(f"Actual vs Predicted CO2 for LSTM (Forecast Step {forecast_step})")
+    ax.set_title(
+        f"Actual vs Predicted {target_label} for LSTM "
+        f"(Forecast Step {forecast_step})"
+    )
     fig.tight_layout()
 
     if results_dir is not None:
@@ -1030,9 +1071,10 @@ def plot_actual_vs_predicted_scatter(
         linewidth=1.5,
         label="Perfect prediction"
     )
-    ax.set_xlabel("Actual scaled CO2")
-    ax.set_ylabel("Predicted scaled CO2")
-    ax.set_title("Actual vs Predicted Scatter for LSTM")
+    target_label = get_target_label(TARGET)
+    ax.set_xlabel(f"Actual scaled {target_label}")
+    ax.set_ylabel(f"Predicted scaled {target_label}")
+    ax.set_title(f"Actual vs Predicted Scatter for LSTM ({target_label})")
     ax.legend()
     ax.grid(alpha=0.25)
     fig.tight_layout()
@@ -1262,12 +1304,17 @@ def run_lstm_model(
         "training_runtime_seconds": run_elapsed_time,
         "training_runtime_formatted": format_elapsed_time(run_elapsed_time),
 
-        # ADD THESE for Explainability techniques
+        # Objects reused by optional explainability and uncertainty stages.
+        "train_loader": train_loader,
+        "val_loader": val_loader,
+        "test_loader": test_loader,
         "X_train": X_train,
         "X_test": X_test,
         "model_features": model_features,
         "output_seq_length": output_seq_length,
         "resample_time": resample_time,
+        "epochs": epochs,
+        "batch_size": batch_size,
         "dropout_rate": dropout_rate,
         "learning_rate": learning_rate,
         "hidden_size": hidden_size,
@@ -1283,10 +1330,5 @@ def run_lstm_model(
         "scattering_j": scattering_j,
         "scattering_q": scattering_q,
         "n_scattering_features": n_scattering_features,
-
-        # ADD THESE for Deep Ensemble
-        "train_loader": train_loader,
-        "val_loader": val_loader,
-        "test_loader": test_loader,
         "input_size": input_size,
     }

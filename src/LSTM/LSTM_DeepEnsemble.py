@@ -39,7 +39,7 @@ def plot_deep_ensemble_uncertainty(
     mean_predictions,
     std_predictions,
     forecast_step=1,
-    max_plot_points=None,
+    max_plot_points=10000,
     target_label="CO2",
     results_dir=None
 ):

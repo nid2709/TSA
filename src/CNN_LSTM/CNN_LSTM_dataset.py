@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import torch
+from numpy.lib.stride_tricks import sliding_window_view
 from torch.utils.data import DataLoader, TensorDataset
 
 from src.CNN_LSTM.CNN_LSTM_config import (
@@ -50,7 +51,7 @@ def create_sequences(
     n_scattering_features=DEFAULT_N_SCATTERING_FEATURES,
     split_name=None
 ):
-    X, y = [], []
+    X_parts, y_parts = [], []
     target_index = model_features.index(TARGET)
     segment_summary = []
 
@@ -70,7 +71,9 @@ def create_sequences(
     )
 
     for (station_id, segment_id), segment_data in grouped_segments:
-        values = segment_data[model_features].values
+        values = np.ascontiguousarray(
+            segment_data[model_features].to_numpy(dtype=np.float32)
+        )
 
         required_length = input_seq_length + output_seq_length
         created_count = max(0, len(values) - required_length + 1)
@@ -97,45 +100,74 @@ def create_sequences(
             }
         )
 
-        for i in range(
-            len(values) - input_seq_length - output_seq_length + 1
-        ):
+        if not use_scattering:
+            input_windows = sliding_window_view(
+                values,
+                window_shape=input_seq_length,
+                axis=0
+            )
+            input_windows = input_windows[:created_count].transpose(0, 2, 1)
+
+            target_values = values[input_seq_length:, target_index]
+            target_windows = sliding_window_view(
+                target_values,
+                window_shape=output_seq_length
+            )[:created_count]
+
+            X_parts.append(
+                np.ascontiguousarray(input_windows, dtype=np.float32)
+            )
+            y_parts.append(
+                np.ascontiguousarray(target_windows, dtype=np.float32)
+            )
+            continue
+
+        for i in range(created_count):
             input_window = values[i:i + input_seq_length]
 
-            if use_scattering:
-                if scattering_transform is None:
-                    raise ValueError(
-                        "scattering_transform must be provided when "
-                        "use_scattering=True"
-                    )
-
-                co2_window = input_window[:, target_index]
-                static_scattering_vector = compute_static_scattering_features(
-                    co2_window,
-                    scattering_transform,
-                    n_scattering_features=n_scattering_features
-                )
-                repeated_scattering = np.repeat(
-                    static_scattering_vector.reshape(1, -1),
-                    input_seq_length,
-                    axis=0
-                )
-                input_window = np.concatenate(
-                    [input_window, repeated_scattering],
-                    axis=1
+            if scattering_transform is None:
+                raise ValueError(
+                    "scattering_transform must be provided when "
+                    "use_scattering=True"
                 )
 
-            X.append(input_window)
-            y.append(
+            co2_window = input_window[:, target_index]
+            static_scattering_vector = compute_static_scattering_features(
+                co2_window,
+                scattering_transform,
+                n_scattering_features=n_scattering_features
+            )
+            repeated_scattering = np.repeat(
+                static_scattering_vector.reshape(1, -1),
+                input_seq_length,
+                axis=0
+            )
+            input_window = np.concatenate(
+                [input_window, repeated_scattering],
+                axis=1
+            )
+
+            X_parts.append(input_window.astype(np.float32, copy=False))
+            y_parts.append(
                 values[
                     i + input_seq_length:
                     i + input_seq_length + output_seq_length,
                     target_index
-                ]
+                ].astype(np.float32, copy=False)
             )
 
-    X = np.array(X)
-    y = np.array(y)
+    if use_scattering:
+        X = np.asarray(X_parts, dtype=np.float32)
+        y = np.asarray(y_parts, dtype=np.float32)
+    elif X_parts:
+        X = np.concatenate(X_parts, axis=0)
+        y = np.concatenate(y_parts, axis=0)
+    else:
+        X = np.empty(
+            (0, input_seq_length, len(model_features)),
+            dtype=np.float32
+        )
+        y = np.empty((0, output_seq_length), dtype=np.float32)
 
     label = f"{split_name} " if split_name else ""
     print(f"{label}sequence input shape:", X.shape)
@@ -166,8 +198,8 @@ def create_sequences(
     return X, y
 
 def create_loader(X, y, batch_size=32, shuffle=False, split_name=None):
-    X = torch.tensor(X, dtype=torch.float32)
-    y = torch.tensor(y, dtype=torch.float32)
+    X = torch.from_numpy(X).float()
+    y = torch.from_numpy(y).float()
 
     loader = DataLoader(TensorDataset(X, y), batch_size=batch_size, shuffle=shuffle)
 
@@ -325,7 +357,10 @@ def prepare_cnn_lstm_data(
 
     if use_scattering:
         print("\n========== SCATTERING WAVELET FEATURES ==========")
-        print("Scattering source signal: scaled scd41_co2 input window")
+        print(
+            "Scattering source signal:",
+            f"scaled {TARGET} input window"
+        )
         print("Scattering J:", scattering_j)
         print("Scattering Q:", scattering_q)
         print("Static scattering features:", n_scattering_features)

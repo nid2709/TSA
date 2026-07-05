@@ -1,3 +1,5 @@
+import os
+
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -50,27 +52,73 @@ def load_prepare_data(csv_path="data/indoorAir2.csv"):
     return df
 
 
-def plot_time_series(df):
-    plt.figure(figsize=(10, 4))
-    plt.plot(df['scd41_co2'])
-    plt.title("CO2 Time Series")
-    plt.show()
+def get_eda_plots_dir(results_dir):
+    eda_dir = os.path.join(results_dir, "eda_plots")
+    os.makedirs(eda_dir, exist_ok=True)
+    return eda_dir
 
 
-def plot_heatmap(df):
+def plot_time_series(
+    df,
+    results_dir=None,
+    max_plot_points=10000,
+    target_column='scd41_co2',
+    target_label='CO2'
+):
+    if target_column not in df.columns:
+        raise ValueError(f"Target column '{target_column}' not found in dataframe.")
+
+    plot_df = df
+    if max_plot_points is not None and len(df) > max_plot_points:
+        step = max(1, len(df) // max_plot_points)
+        plot_df = df.iloc[::step]
+
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ax.plot(plot_df.index, plot_df[target_column])
+    ax.set_title(f"{target_label} Time Series")
+    ax.set_xlabel("Timestamp")
+    ax.set_ylabel(target_label)
+    fig.tight_layout()
+
+    if results_dir is not None:
+        save_path = os.path.join(
+            get_eda_plots_dir(results_dir),
+            f"{target_column}_time_series.png"
+        )
+        fig.savefig(save_path, dpi=300)
+        print(f"Saved {target_label} time series plot:", save_path)
+
+    # plt.show()
+    plt.close(fig)
+
+
+def plot_heatmap(df, results_dir=None):
     corr = df.select_dtypes(include=['float64', 'int64']).corr()
-    plt.figure(figsize=(12, 8))
+    fig, ax = plt.subplots(figsize=(12, 8))
     sns.heatmap(
         corr,
         annot=True,
         cmap='coolwarm',
-        fmt=".2f"
+        fmt=".2f",
+        ax=ax
     )
 
-    plt.title("Correlation Heatmap")
-    plt.show()
+    ax.set_title("Correlation Heatmap")
+    fig.tight_layout()
 
-def plot_pca_analysis(df):
+    if results_dir is not None:
+        save_path = os.path.join(
+            get_eda_plots_dir(results_dir),
+            "correlation_heatmap.png"
+        )
+        fig.savefig(save_path, dpi=300)
+        print("Saved correlation heatmap:", save_path)
+
+    # plt.show()
+    plt.close(fig)
+
+
+def plot_pca_analysis(df, results_dir=None):
     numerical_df = df[PCA_FEATURES].copy()
 
     # --------------------------------------------------
@@ -96,14 +144,25 @@ def plot_pca_analysis(df):
     print("\nCumulative Variance:")
     print(cumulative_variance)
 
-    plt.figure(figsize=(8, 4))
-    plt.plot(
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.plot(
         range(1, len(cumulative_variance) + 1),
         cumulative_variance,
         marker='o'
     )
-    plt.xlabel("Number of Principal Components")
-    plt.ylabel("Cumulative Explained Variance")
-    plt.title("PCA Cumulative Explained Variance")
-    plt.grid(True)
-    plt.show()
+    ax.set_xlabel("Number of Principal Components")
+    ax.set_ylabel("Cumulative Explained Variance")
+    ax.set_title("PCA Cumulative Explained Variance")
+    ax.grid(True)
+    fig.tight_layout()
+
+    if results_dir is not None:
+        save_path = os.path.join(
+            get_eda_plots_dir(results_dir),
+            "pca_cumulative_explained_variance.png"
+        )
+        fig.savefig(save_path, dpi=300)
+        print("Saved PCA cumulative explained variance plot:", save_path)
+
+    # plt.show()
+    plt.close(fig)

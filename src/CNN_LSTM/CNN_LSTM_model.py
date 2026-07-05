@@ -168,8 +168,8 @@ def train_model(
         optimizer,
         mode="min",
         factor=0.5,
-        patience=3,
-        min_lr=1e-5
+        patience=1,
+        min_lr=5e-6
     )
 
     train_losses, val_losses = [], []

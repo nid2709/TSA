@@ -3,6 +3,9 @@ import time
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MPL_CONFIG_DIR = os.path.join(BASE_DIR, ".matplotlib")
+os.makedirs(MPL_CONFIG_DIR, exist_ok=True)
+os.environ.setdefault("MPLCONFIGDIR", MPL_CONFIG_DIR)
 
 from src.LSTM.dataLoad import (
     load_prepare_data,
@@ -15,9 +18,12 @@ from src.LSTM.LSTM_co2 import (
     DEFAULT_OUTPUT_SEQ_LENGTH,
     DEFAULT_MAX_FILL_STEPS
 )
-from src.LSTM.LSTM_UQ import run_mc_dropout_uq
-from src.LSTM.LSTM_DeepEnsemble import run_deep_ensemble_uq
-from src.LSTM.LSTM_explainability import run_shap_experiment
+
+
+RUN_EXPLAINABILITY = True
+RUN_MC_DROPOUT = True
+RUN_DEEP_ENSEMBLE = True
+SAVE_EDA_PLOTS = False
 
 
 def format_elapsed_time(seconds):
@@ -40,11 +46,6 @@ def run_pipeline():
     csv_path = os.path.join(BASE_DIR, "data", "indoorAir2.csv")
 
     df = load_prepare_data(csv_path)
-
-    # Optional analysis plots
-    # plot_time_series(df)
-    # plot_heatmap(df)
-    # plot_pca_analysis(df)
 
     # Train LSTM and keep returned values needed for Explainability techniques.
     # LSTM_explainability.py uses model, X_train, X_test, actuals, and features.
@@ -78,58 +79,90 @@ def run_pipeline():
     print("Results directory:", lstm_results["results_dir"])
     print("LSTM runtime:", lstm_results["training_runtime_formatted"])
 
-    # Explainability techniques - saves SHAP, PFI and Integrated Gradients images
-    # using the already trained LSTM model.
-    explainability_start_time = time.perf_counter()
-    explainability_results = run_shap_experiment(
-        lstm_results
-    )
-    explainability_elapsed_time = (
-        time.perf_counter() - explainability_start_time
-    )
+    if SAVE_EDA_PLOTS:
+        print("\n========== SAVING EDA PLOTS ==========")
+        plot_time_series(
+            df,
+            results_dir=lstm_results["results_dir"],
+            target_column=lstm_results["target_column"],
+            target_label=lstm_results["target_label"]
+        )
+        plot_heatmap(df, results_dir=lstm_results["results_dir"])
+        plot_pca_analysis(df, results_dir=lstm_results["results_dir"])
+    else:
+        print(
+            "\nEDA plots skipped. Set SAVE_EDA_PLOTS=True to save all EDA plots."
+        )
 
-    print("\n========== EXPLAINABILITY FINISHED ==========")
-    print(
-        "Explainability runtime:",
-        format_elapsed_time(explainability_elapsed_time)
-    )
+    explainability_results = None
+    uq_results = None
+    deep_ensemble_results = None
+    explainability_elapsed_time = 0
+    uq_elapsed_time = 0
+    deep_ensemble_elapsed_time = 0
 
-    # Uncertainty Quantifiers
-    print("\n========== RUNNING MONTE CARLO DROPOUT ==========")
-    uq_start_time = time.perf_counter()
-    uq_results = run_mc_dropout_uq(
-        lstm_results,
-        n_samples=100,
-        batch_size=256
-    )
-    uq_elapsed_time = time.perf_counter() - uq_start_time
+    if RUN_EXPLAINABILITY:
+        from src.LSTM.LSTM_explainability import run_shap_experiment
 
-    print("\n========== MONTE CARLO DROPOUT FINISHED ==========")
-    print("MC Dropout runtime:", format_elapsed_time(uq_elapsed_time))
-    print("\n========== RUNNING DEEP ENSEMBLE ==========")
+        explainability_start_time = time.perf_counter()
+        explainability_results = run_shap_experiment(lstm_results)
+        explainability_elapsed_time = (
+            time.perf_counter() - explainability_start_time
+        )
 
-    deep_ensemble_start_time = time.perf_counter()
-    deep_ensemble_results = run_deep_ensemble_uq(
-        train_loader=lstm_results["train_loader"],
-        val_loader=lstm_results["val_loader"],
-        test_loader=lstm_results["test_loader"],
-        input_size=lstm_results["input_size"],
-        actuals=lstm_results["actuals"],
-        output_seq_length=lstm_results["output_seq_length"],
-        target_label=lstm_results["target_label"],
-        epochs=10,
-        n_models=3,
-        results_dir=lstm_results["results_dir"],
-        hidden_size=lstm_results["hidden_size"],
-        num_layers=lstm_results["num_layers"],
-        dropout_rate=lstm_results["dropout_rate"],
-        learning_rate=lstm_results["learning_rate"],
-        weight_decay=lstm_results["weight_decay"],
-        restore_best_model=lstm_results["restore_best_model"]
-    )
-    deep_ensemble_elapsed_time = (
-        time.perf_counter() - deep_ensemble_start_time
-    )
+        print("\n========== EXPLAINABILITY FINISHED ==========")
+        print(
+            "Explainability runtime:",
+            format_elapsed_time(explainability_elapsed_time)
+        )
+    else:
+        print("\nExplainability skipped. Set RUN_EXPLAINABILITY=True to run SHAP/PFI/IG.")
+
+    if RUN_MC_DROPOUT:
+        from src.LSTM.LSTM_UQ import run_mc_dropout_uq
+
+        print("\n========== RUNNING MONTE CARLO DROPOUT ==========")
+        uq_start_time = time.perf_counter()
+        uq_results = run_mc_dropout_uq(
+            lstm_results,
+            n_samples=100,
+            batch_size=256
+        )
+        uq_elapsed_time = time.perf_counter() - uq_start_time
+
+        print("\n========== MONTE CARLO DROPOUT FINISHED ==========")
+        print("MC Dropout runtime:", format_elapsed_time(uq_elapsed_time))
+    else:
+        print("MC Dropout skipped. Set RUN_MC_DROPOUT=True to run it.")
+
+    if RUN_DEEP_ENSEMBLE:
+        from src.LSTM.LSTM_DeepEnsemble import run_deep_ensemble_uq
+
+        print("\n========== RUNNING DEEP ENSEMBLE ==========")
+        deep_ensemble_start_time = time.perf_counter()
+        deep_ensemble_results = run_deep_ensemble_uq(
+            train_loader=lstm_results["train_loader"],
+            val_loader=lstm_results["val_loader"],
+            test_loader=lstm_results["test_loader"],
+            input_size=lstm_results["input_size"],
+            actuals=lstm_results["actuals"],
+            output_seq_length=lstm_results["output_seq_length"],
+            target_label=lstm_results["target_label"],
+            epochs=10,
+            n_models=3,
+            results_dir=lstm_results["results_dir"],
+            hidden_size=lstm_results["hidden_size"],
+            num_layers=lstm_results["num_layers"],
+            dropout_rate=lstm_results["dropout_rate"],
+            learning_rate=lstm_results["learning_rate"],
+            weight_decay=lstm_results["weight_decay"],
+            restore_best_model=lstm_results["restore_best_model"]
+        )
+        deep_ensemble_elapsed_time = (
+            time.perf_counter() - deep_ensemble_start_time
+        )
+    else:
+        print("Deep Ensemble skipped. Set RUN_DEEP_ENSEMBLE=True to run it.")
 
     pipeline_elapsed_time = time.perf_counter() - pipeline_start_time
 

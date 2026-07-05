@@ -58,7 +58,8 @@ def plot_scattering_wavelet_features(
     ]
 
     sample_window = X_train[0]
-    co2_signal = sample_window[:, target_index]
+    target_label = get_target_label(TARGET)
+    target_signal = sample_window[:, target_index]
 
     # Scattering features are static within a sequence, so the first timestep
     # contains the same coefficient values supplied at every timestep.
@@ -72,14 +73,14 @@ def plot_scattering_wavelet_features(
     )
 
     axes[0].plot(
-        np.arange(len(co2_signal)),
-        co2_signal,
+        np.arange(len(target_signal)),
+        target_signal,
         color="tab:blue",
         linewidth=1.8
     )
     axes[0].set_title("Representative Input Window")
     axes[0].set_xlabel("Input timestep")
-    axes[0].set_ylabel("Scaled CO2")
+    axes[0].set_ylabel(f"Scaled {target_label}")
     axes[0].grid(alpha=0.25)
 
     feature_labels = [
@@ -205,10 +206,14 @@ def plot_predictions(
     ax.plot(x_values, actual_values, label="Actual")
     ax.plot(x_values, predicted_values, label="Predicted")
     ax.set_xlabel("Test sample index")
-    ax.set_ylabel("Scaled CO2")
+    target_label = get_target_label(TARGET)
+    ax.set_ylabel(f"Scaled {target_label}")
     ax.xaxis.set_major_locator(MaxNLocator(nbins=8, integer=True))
     ax.legend()
-    ax.set_title(f"Actual vs Predicted CO2 for CNN-LSTM (Forecast Step {forecast_step})")
+    ax.set_title(
+        f"Actual vs Predicted {target_label} for CNN-LSTM "
+        f"(Forecast Step {forecast_step})"
+    )
     fig.tight_layout()
 
     if results_dir is not None:
@@ -255,9 +260,10 @@ def plot_actual_vs_predicted_scatter(
         linewidth=1.5,
         label="Perfect prediction"
     )
-    ax.set_xlabel("Actual scaled CO2")
-    ax.set_ylabel("Predicted scaled CO2")
-    ax.set_title("Actual vs Predicted Scatter for CNN-LSTM")
+    target_label = get_target_label(TARGET)
+    ax.set_xlabel(f"Actual scaled {target_label}")
+    ax.set_ylabel(f"Predicted scaled {target_label}")
+    ax.set_title(f"Actual vs Predicted Scatter for CNN-LSTM ({target_label})")
     ax.legend()
     ax.grid(alpha=0.25)
     fig.tight_layout()
