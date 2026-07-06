@@ -12,6 +12,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 from src.CNN_LSTM.CNN_LSTM_config import (
     DEFAULT_CONV_CHANNELS,
+    DEFAULT_DEVICE,
     DEFAULT_DROPOUT_RATE,
     DEFAULT_EPOCHS,
     DEFAULT_HIDDEN_SIZE,
@@ -111,11 +112,29 @@ class CNNLSTMModel(nn.Module):
         return self.fc(output), attention_weights
 
 
+def get_training_device(preferred_device=DEFAULT_DEVICE):
+    if preferred_device == "mps" and torch.backends.mps.is_available():
+        return torch.device("mps")
+
+    if preferred_device == "cuda" and torch.cuda.is_available():
+        return torch.device("cuda")
+
+    if preferred_device == "mps":
+        print("MPS requested but not available. Falling back to CPU.")
+    elif preferred_device == "cuda":
+        print("CUDA requested but not available. Falling back to CPU.")
+
+    return torch.device("cpu")
+
+
 def print_batch_sanity_check(model, train_loader):
     print("\n========== BATCH SANITY CHECK ==========")
 
+    device = next(model.parameters()).device
     model.eval()
     X_batch, y_batch = next(iter(train_loader))
+    X_batch = X_batch.to(device)
+    y_batch = y_batch.to(device)
 
     with torch.no_grad():
         y_pred = model(X_batch)
@@ -134,9 +153,12 @@ def print_batch_sanity_check(model, train_loader):
 def evaluate_loss(model, loader, criterion):
     model.eval()
     total_loss = 0
+    device = next(model.parameters()).device
 
     with torch.no_grad():
         for X_batch, y_batch in loader:
+            X_batch = X_batch.to(device)
+            y_batch = y_batch.to(device)
             predictions = model(X_batch)
             loss = criterion(predictions, y_batch)
             total_loss += loss.item()
@@ -155,6 +177,10 @@ def train_model(
     restore_best_model=DEFAULT_RESTORE_BEST_MODEL,
     min_delta=1e-6
 ):
+    device = get_training_device()
+    model.to(device)
+    print("Training device:", device)
+
     criterion = nn.MSELoss()
     print("\nUsing standard MSE loss.")
 
@@ -181,6 +207,8 @@ def train_model(
         model.train()
         train_loss = 0
         for X_batch, y_batch in train_loader:
+            X_batch = X_batch.to(device)
+            y_batch = y_batch.to(device)
             optimizer.zero_grad()
             predictions = model(X_batch)
             loss = criterion(predictions, y_batch)
@@ -330,11 +358,13 @@ def plot_horizon_error_analysis(horizon_metrics, results_dir):
 def evaluate_model(model, test_loader, results_dir=None):
     model.eval()
     predictions, actuals = [], []
+    device = next(model.parameters()).device
 
     with torch.no_grad():
         for X_batch, y_batch in test_loader:
+            X_batch = X_batch.to(device)
             outputs = model(X_batch)
-            predictions.extend(outputs.numpy())
+            predictions.extend(outputs.cpu().numpy())
             actuals.extend(y_batch.numpy())
 
     predictions = np.array(predictions)

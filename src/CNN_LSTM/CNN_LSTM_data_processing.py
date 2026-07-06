@@ -40,6 +40,7 @@ def preprocess_data(
     if "timestamp" not in df.columns:
         df["timestamp"] = df.index
     df = df.reset_index(drop=True)
+    df["timestamp"] = pd.to_datetime(df["timestamp"])
 
     sensor_features = [
         column for column in base_features
@@ -68,11 +69,18 @@ def preprocess_data(
         .reset_index()
     )
 
-    df[sensor_features] = (
-        df
-        .groupby(station_column)[sensor_features]
-        .transform(lambda x: x.interpolate(method="linear").ffill().bfill())
-    )
+    filled_station_parts = []
+    for _, station_data in df.groupby(station_column, sort=False):
+        station_data = station_data.copy()
+        station_data[sensor_features] = (
+            station_data[sensor_features]
+            .interpolate(method="linear")
+            .ffill()
+            .bfill()
+        )
+        filled_station_parts.append(station_data)
+
+    df = pd.concat(filled_station_parts, ignore_index=True)
 
     # Match the usable rows after the N-BEATS 15-minute-ahead step without
     # adding a separate ahead target column. CNN-LSTM creates multi-step

@@ -43,6 +43,8 @@ DEFAULT_DROP_SHORT_STATIONS = True
 DEFAULT_CLIP_OUTLIERS = True
 DEFAULT_OUTLIER_CLIP_FACTOR = 1.5
 DEFAULT_RESTORE_BEST_MODEL = True
+DEFAULT_DEVICE = "mps"
+DEFAULT_USE_GAP_AWARE_SEGMENTS = False
 
 DEFAULT_USE_SCATTERING = False
 DEFAULT_SCATTERING_J = 4
@@ -96,6 +98,7 @@ def get_lstm_results_dir(
     drop_short_stations=DEFAULT_DROP_SHORT_STATIONS,
     clip_outliers=DEFAULT_CLIP_OUTLIERS,
     restore_best_model=DEFAULT_RESTORE_BEST_MODEL,
+    use_gap_aware_segments=DEFAULT_USE_GAP_AWARE_SEGMENTS,
     use_scattering=DEFAULT_USE_SCATTERING,
     scattering_j=DEFAULT_SCATTERING_J,
     scattering_q=DEFAULT_SCATTERING_Q,
@@ -122,6 +125,7 @@ def get_lstm_results_dir(
         f"DSS{int(drop_short_stations)}_"
         f"CLP{int(clip_outliers)}_"
         f"RB{int(restore_best_model)}_"
+        f"GAP{int(use_gap_aware_segments)}_"
         f"SWT{int(use_scattering)}_"
         f"SWJ{scattering_j if use_scattering else 0}_"
         f"SWQ{scattering_q if use_scattering else 0}_"

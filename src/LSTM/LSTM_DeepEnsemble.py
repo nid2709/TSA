@@ -28,6 +28,9 @@ from src.LSTM.LSTM_co2 import (
 )
 
 
+MAX_DEEP_ENSEMBLE_PLOT_POINTS = 10000
+
+
 def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
@@ -39,7 +42,7 @@ def plot_deep_ensemble_uncertainty(
     mean_predictions,
     std_predictions,
     forecast_step=1,
-    max_plot_points=10000,
+    max_plot_points=MAX_DEEP_ENSEMBLE_PLOT_POINTS,
     target_label="CO2",
     results_dir=None
 ):
@@ -60,6 +63,10 @@ def plot_deep_ensemble_uncertainty(
     upper_bound = mean_values + 1.96 * std_values
 
     if max_plot_points is not None and len(x_values) > max_plot_points:
+        print(
+            f"Deep Ensemble plot limited to first {max_plot_points} "
+            f"of {len(x_values)} test samples."
+        )
         x_values = x_values[:max_plot_points]
         actual_values = actual_values[:max_plot_points]
         mean_values = mean_values[:max_plot_points]
@@ -223,6 +230,7 @@ def run_deep_ensemble_uq(
         mean_predictions,
         std_predictions,
         forecast_step=1,
+        max_plot_points=MAX_DEEP_ENSEMBLE_PLOT_POINTS,
         target_label=target_label,
         results_dir=results_dir
     )
@@ -233,6 +241,7 @@ def run_deep_ensemble_uq(
             mean_predictions,
             std_predictions,
             forecast_step=output_seq_length,
+            max_plot_points=MAX_DEEP_ENSEMBLE_PLOT_POINTS,
             target_label=target_label,
             results_dir=results_dir
         )

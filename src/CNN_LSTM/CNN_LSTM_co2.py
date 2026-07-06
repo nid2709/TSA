@@ -22,6 +22,7 @@ from src.CNN_LSTM.CNN_LSTM_config import (
     DEFAULT_SCATTERING_J,
     DEFAULT_SCATTERING_Q,
     DEFAULT_USE_ATTENTION,
+    DEFAULT_USE_GAP_AWARE_SEGMENTS,
     DEFAULT_USE_SCATTERING,
     DEFAULT_WEIGHT_DECAY,
     SEGMENT_COLUMN,
@@ -82,6 +83,7 @@ def run_cnn_lstm_model(
     clip_outliers=DEFAULT_CLIP_OUTLIERS,
     outlier_clip_factor=DEFAULT_OUTLIER_CLIP_FACTOR,
     restore_best_model=DEFAULT_RESTORE_BEST_MODEL,
+    use_gap_aware_segments=DEFAULT_USE_GAP_AWARE_SEGMENTS,
     show_prediction_plot=True,
     use_scattering=DEFAULT_USE_SCATTERING,
     scattering_j=DEFAULT_SCATTERING_J,
@@ -107,7 +109,7 @@ def run_cnn_lstm_model(
     print("Clip outliers:", clip_outliers)
     print("Outlier clip factor:", outlier_clip_factor)
     print("Restore best validation checkpoint:", restore_best_model)
-    print("Gap-aware sequence generation:", True)
+    print("Gap-aware sequence generation:", use_gap_aware_segments)
     print("Convolution channels:", DEFAULT_CONV_CHANNELS)
     print("Use scattering:", use_scattering)
     print("Use attention:", use_attention)
@@ -135,6 +137,7 @@ def run_cnn_lstm_model(
         drop_short_stations=drop_short_stations,
         clip_outliers=clip_outliers,
         outlier_clip_factor=outlier_clip_factor,
+        use_gap_aware_segments=use_gap_aware_segments,
         use_scattering=use_scattering,
         scattering_j=scattering_j,
         scattering_q=scattering_q,
@@ -165,6 +168,7 @@ def run_cnn_lstm_model(
         drop_short_stations=drop_short_stations,
         clip_outliers=clip_outliers,
         restore_best_model=restore_best_model,
+        use_gap_aware_segments=use_gap_aware_segments,
         use_scattering=use_scattering,
         scattering_j=scattering_j,
         scattering_q=scattering_q,
@@ -285,7 +289,7 @@ def run_cnn_lstm_model(
         "clip_outliers": clip_outliers,
         "outlier_clip_factor": outlier_clip_factor,
         "restore_best_model": restore_best_model,
-        "gap_aware_sequences": True,
+        "gap_aware_sequences": use_gap_aware_segments,
         "use_scattering": use_scattering,
         "scattering_j": scattering_j,
         "scattering_q": scattering_q,

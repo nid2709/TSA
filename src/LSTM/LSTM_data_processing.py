@@ -8,8 +8,13 @@ from sklearn.preprocessing import MinMaxScaler
 def add_time_features(df):
     df = df.copy()
 
-    hour = df.index.hour
-    dayofweek = df.index.dayofweek
+    if "timestamp" in df.columns:
+        timestamps = pd.to_datetime(df["timestamp"])
+    else:
+        timestamps = pd.Series(pd.to_datetime(df.index), index=df.index)
+
+    hour = timestamps.dt.hour
+    dayofweek = timestamps.dt.dayofweek
 
     df["hour_sin"] = np.sin(2 * np.pi * hour / 24)
     df["hour_cos"] = np.cos(2 * np.pi * hour / 24)
@@ -30,32 +35,69 @@ def preprocess_data(
 ):
     df = df.copy()
 
-    print("\n========== PREPROCESSING ==========")
-    print("Raw dataset shape:", df.shape)
+    print("\n========== Feature Selecting ==========")
 
-    print(
-        "\nStations available:",
-        sorted(df[station_column].unique().tolist())
+    if "timestamp" not in df.columns:
+        df["timestamp"] = df.index
+    df = df.reset_index(drop=True)
+    df["timestamp"] = pd.to_datetime(df["timestamp"])
+
+    sensor_features = [
+        column for column in base_features
+        if column in df.columns
+    ]
+
+    # Station 6 is removed to match the N-BEATS preprocessing pipeline.
+    df = df[df[station_column] != 6].copy()
+    df = df[sensor_features + ["timestamp", station_column]]
+    print(df.shape)
+
+    resample_label = (
+        "15 Minutes"
+        if str(resample_time).lower() == "15min"
+        else resample_time
     )
-
-    df = add_time_features(df)
-    df = df[base_features + [station_column]]
-
-    print("\nSelected features:")
-    print(base_features)
-    print("\nAfter feature selection:", df.shape)
-
+    print(f"\n========== Data Resampling with {resample_label} ==========")
     df = (
-        df.groupby(station_column)
+        df
+        .sort_values([station_column, "timestamp"])
+        .set_index("timestamp")
+        .groupby(station_column)
+        [sensor_features]
         .resample(resample_time)
         .mean()
-        .drop(columns=station_column, errors="ignore")
-        .reset_index(level=0)
+        .reset_index()
     )
 
-    print(f"\nAfter {resample_time} resampling:", df.shape)
+    filled_station_parts = []
+    for _, station_data in df.groupby(station_column, sort=False):
+        station_data = station_data.copy()
+        station_data[sensor_features] = (
+            station_data[sensor_features]
+            .interpolate(method="linear")
+            .ffill()
+            .bfill()
+        )
+        filled_station_parts.append(station_data)
 
-    return df[base_features + [station_column]]
+    df = pd.concat(filled_station_parts, ignore_index=True)
+
+    # Match the usable rows after the N-BEATS 15-minute-ahead step without
+    # adding a separate ahead target column. LSTM creates multi-step targets
+    # during window generation.
+    df = (
+        df
+        .sort_values([station_column, "timestamp"])
+        .groupby(station_column, group_keys=False)
+        .head(-1)
+        .reset_index(drop=True)
+    )
+
+    print(df.shape)
+
+    df = add_time_features(df)
+
+    return df[base_features + ["timestamp", station_column]]
 
 
 def train_val_test_spliting(
@@ -216,13 +258,13 @@ def fill_missing_dataframe(
     station_column,
     segment_column,
     resample_time,
-    max_fill_steps
+    max_fill_steps,
+    use_gap_aware_segments=False
 ):
     cleaned_parts = []
     input_features = [col for col in base_features if col != target_column]
     expected_interval = pd.Timedelta(resample_time)
     expected_interval_seconds = expected_interval.total_seconds()
-
     for station_id, station_df in df.groupby(station_column, sort=True):
         station_df = station_df.copy()
         station_df["timestamp"] = pd.to_datetime(
@@ -253,23 +295,25 @@ def fill_missing_dataframe(
         print(station_df.isna().sum().sum())
 
         if len(station_df) > 0:
-            timestamp_differences = station_df["timestamp"].diff()
-            gap_seconds = (
-                timestamp_differences
-                .dt.total_seconds()
-                .fillna(0)
-            )
-            gap_mask = gap_seconds > expected_interval_seconds
-            station_df[segment_column] = gap_mask.cumsum().astype(int)
+            if use_gap_aware_segments:
+                timestamp_differences = station_df["timestamp"].diff()
+                gap_seconds = (
+                    timestamp_differences
+                    .dt.total_seconds()
+                    .fillna(0)
+                )
+                gap_mask = gap_seconds > expected_interval_seconds
+                station_df[segment_column] = gap_mask.cumsum().astype(int)
 
-            detected_gaps = int(gap_mask.sum())
-            segment_count = int(station_df[segment_column].nunique())
-            maximum_gap = pd.to_timedelta(gap_seconds.max(), unit="s")
+                detected_gaps = int(gap_mask.sum())
+                segment_count = int(station_df[segment_column].nunique())
+                maximum_gap = pd.to_timedelta(gap_seconds.max(), unit="s")
 
-            print(f"Detected timestamp gaps (Station {station_id}): {detected_gaps}")
-            print(f"Continuous segments (Station {station_id}): {segment_count}")
-            print(f"Largest timestamp difference (Station {station_id}): {maximum_gap}")
-
+                print(f"Detected timestamp gaps (Station {station_id}): {detected_gaps}")
+                print(f"Continuous segments (Station {station_id}): {segment_count}")
+                print(f"Largest timestamp difference (Station {station_id}): {maximum_gap}")
+            else:
+                station_df[segment_column] = 0
             cleaned_parts.append(station_df)
 
     if len(cleaned_parts) == 0:

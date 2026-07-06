@@ -27,15 +27,15 @@ TARGET = 'scd41_co2'
 STATION_COLUMN = 'station_id'
 SEGMENT_COLUMN = '_continuous_segment_id'
 
-DEFAULT_INPUT_SEQ_LENGTH = 672
-DEFAULT_OUTPUT_SEQ_LENGTH = 48
+DEFAULT_INPUT_SEQ_LENGTH = 192
+DEFAULT_OUTPUT_SEQ_LENGTH = 12
 DEFAULT_BATCH_SIZE = 64
-DEFAULT_EPOCHS = 12
-DEFAULT_LEARNING_RATE = 0.000015
+DEFAULT_EPOCHS = 10
+DEFAULT_LEARNING_RATE = 0.00001
 DEFAULT_HIDDEN_SIZE = 128
 DEFAULT_RESAMPLE_TIME = '15min'
-DEFAULT_DROPOUT_RATE = 0.3
-DEFAULT_WEIGHT_DECAY = 5e-4
+DEFAULT_DROPOUT_RATE = 0.2
+DEFAULT_WEIGHT_DECAY = 1e-4
 DEFAULT_NUM_LAYERS = 2
 
 DEFAULT_MAX_FILL_STEPS = 2
@@ -44,6 +44,8 @@ DEFAULT_CLIP_OUTLIERS = True
 DEFAULT_OUTLIER_CLIP_FACTOR = 1.5
 DEFAULT_RESTORE_BEST_MODEL = True
 DEFAULT_CONV_CHANNELS = 96
+DEFAULT_DEVICE = "mps"
+DEFAULT_USE_GAP_AWARE_SEGMENTS = False
 
 DEFAULT_USE_SCATTERING = False
 DEFAULT_SCATTERING_J = 4
@@ -97,6 +99,7 @@ def get_cnn_lstm_results_dir(
     drop_short_stations=DEFAULT_DROP_SHORT_STATIONS,
     clip_outliers=DEFAULT_CLIP_OUTLIERS,
     restore_best_model=DEFAULT_RESTORE_BEST_MODEL,
+    use_gap_aware_segments=DEFAULT_USE_GAP_AWARE_SEGMENTS,
     use_scattering=DEFAULT_USE_SCATTERING,
     scattering_j=DEFAULT_SCATTERING_J,
     scattering_q=DEFAULT_SCATTERING_Q,
@@ -123,6 +126,7 @@ def get_cnn_lstm_results_dir(
         f"DSS{int(drop_short_stations)}_"
         f"CLP{int(clip_outliers)}_"
         f"RB{int(restore_best_model)}_"
+        f"GAP{int(use_gap_aware_segments)}_"
         f"SWT{int(use_scattering)}_"
         f"SWJ{scattering_j if use_scattering else 0}_"
         f"SWQ{scattering_q if use_scattering else 0}_"

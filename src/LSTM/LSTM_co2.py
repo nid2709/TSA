@@ -76,6 +76,8 @@ DEFAULT_DROP_SHORT_STATIONS = True
 DEFAULT_CLIP_OUTLIERS = True # Only make this false when need to preserve all original sensor peaks
 DEFAULT_OUTLIER_CLIP_FACTOR = 1.5
 DEFAULT_RESTORE_BEST_MODEL = True
+DEFAULT_DEVICE = "mps"
+DEFAULT_USE_GAP_AWARE_SEGMENTS = False
 
 DEFAULT_USE_SCATTERING = False
 DEFAULT_SCATTERING_J = 4
@@ -128,6 +130,7 @@ def get_lstm_results_dir(
     drop_short_stations=DEFAULT_DROP_SHORT_STATIONS,
     clip_outliers=DEFAULT_CLIP_OUTLIERS,
     restore_best_model=DEFAULT_RESTORE_BEST_MODEL,
+    use_gap_aware_segments=DEFAULT_USE_GAP_AWARE_SEGMENTS,
     use_scattering=DEFAULT_USE_SCATTERING,
     scattering_j=DEFAULT_SCATTERING_J,
     scattering_q=DEFAULT_SCATTERING_Q,
@@ -153,6 +156,7 @@ def get_lstm_results_dir(
         f"DSS{int(drop_short_stations)}_"
         f"CLP{int(clip_outliers)}_"
         f"RB{int(restore_best_model)}_"
+        f"GAP{int(use_gap_aware_segments)}_"
         f"SWT{int(use_scattering)}_"
         f"SWJ{scattering_j if use_scattering else 0}_"
         f"SWQ{scattering_q if use_scattering else 0}_"
@@ -369,6 +373,7 @@ def prepare_lstm_data(
     drop_short_stations=DEFAULT_DROP_SHORT_STATIONS,
     clip_outliers=DEFAULT_CLIP_OUTLIERS,
     outlier_clip_factor=DEFAULT_OUTLIER_CLIP_FACTOR,
+    use_gap_aware_segments=DEFAULT_USE_GAP_AWARE_SEGMENTS,
     use_scattering=DEFAULT_USE_SCATTERING,
     scattering_j=DEFAULT_SCATTERING_J,
     scattering_q=DEFAULT_SCATTERING_Q,
@@ -403,7 +408,11 @@ def prepare_lstm_data(
         "Maximum feature fill duration:",
         pd.Timedelta(resample_time) * max_fill_steps
     )
-    print("Sequences crossing detected timestamp gaps: disabled")
+    print("Gap-aware sequence generation:", use_gap_aware_segments)
+    print(
+        "Sequences crossing detected timestamp gaps:",
+        "disabled" if use_gap_aware_segments else "allowed"
+    )
 
     train_df = fill_missing_dataframe(
         train_df,
@@ -412,7 +421,8 @@ def prepare_lstm_data(
         station_column=STATION_COLUMN,
         segment_column=SEGMENT_COLUMN,
         resample_time=resample_time,
-        max_fill_steps=max_fill_steps
+        max_fill_steps=max_fill_steps,
+        use_gap_aware_segments=use_gap_aware_segments
     )
     val_df = fill_missing_dataframe(
         val_df,
@@ -421,7 +431,8 @@ def prepare_lstm_data(
         station_column=STATION_COLUMN,
         segment_column=SEGMENT_COLUMN,
         resample_time=resample_time,
-        max_fill_steps=max_fill_steps
+        max_fill_steps=max_fill_steps,
+        use_gap_aware_segments=use_gap_aware_segments
     )
     test_df = fill_missing_dataframe(
         test_df,
@@ -430,7 +441,8 @@ def prepare_lstm_data(
         station_column=STATION_COLUMN,
         segment_column=SEGMENT_COLUMN,
         resample_time=resample_time,
-        max_fill_steps=max_fill_steps
+        max_fill_steps=max_fill_steps,
+        use_gap_aware_segments=use_gap_aware_segments
     )
 
     if clip_outliers:
@@ -603,6 +615,21 @@ class LSTMModel(nn.Module):
         return self.fc(output)
 
 
+def get_training_device(preferred_device=DEFAULT_DEVICE):
+    if preferred_device == "mps" and torch.backends.mps.is_available():
+        return torch.device("mps")
+
+    if preferred_device == "cuda" and torch.cuda.is_available():
+        return torch.device("cuda")
+
+    if preferred_device == "mps":
+        print("MPS requested but not available. Falling back to CPU.")
+    elif preferred_device == "cuda":
+        print("CUDA requested but not available. Falling back to CPU.")
+
+    return torch.device("cpu")
+
+
 # Optional alternative loss for peak-weighted experiments.
 # Currently unused because train_model uses MSELoss.
 # def weighted_mse_loss(predictions, targets):
@@ -614,7 +641,10 @@ def print_batch_sanity_check(model, train_loader):
     print("\n========== BATCH SANITY CHECK ==========")
 
     model.eval()
+    device = next(model.parameters()).device
     X_batch, y_batch = next(iter(train_loader))
+    X_batch = X_batch.to(device)
+    y_batch = y_batch.to(device)
 
     with torch.no_grad():
         y_pred = model(X_batch)
@@ -632,10 +662,13 @@ def print_batch_sanity_check(model, train_loader):
 
 def evaluate_loss(model, loader, criterion):
     model.eval()
+    device = next(model.parameters()).device
     total_loss = 0
 
     with torch.no_grad():
         for X_batch, y_batch in loader:
+            X_batch = X_batch.to(device)
+            y_batch = y_batch.to(device)
             predictions = model(X_batch)
             loss = criterion(predictions, y_batch)
             total_loss += loss.item()
@@ -654,6 +687,10 @@ def train_model(
     restore_best_model=DEFAULT_RESTORE_BEST_MODEL,
     min_delta=1e-6
 ):
+    device = get_training_device()
+    model.to(device)
+    print("Training device:", device)
+
     criterion = nn.MSELoss()
 
     optimizer = torch.optim.AdamW(
@@ -679,6 +716,8 @@ def train_model(
         model.train()
         train_loss = 0
         for X_batch, y_batch in train_loader:
+            X_batch = X_batch.to(device)
+            y_batch = y_batch.to(device)
             optimizer.zero_grad()
             predictions = model(X_batch)
             loss = criterion(predictions, y_batch)
@@ -827,12 +866,14 @@ def plot_horizon_error_analysis(horizon_metrics, results_dir):
 
 def evaluate_model(model, test_loader, results_dir=None):
     model.eval()
+    device = next(model.parameters()).device
     predictions, actuals = [], []
 
     with torch.no_grad():
         for X_batch, y_batch in test_loader:
+            X_batch = X_batch.to(device)
             outputs = model(X_batch)
-            predictions.extend(outputs.numpy())
+            predictions.extend(outputs.cpu().numpy())
             actuals.extend(y_batch.numpy())
 
     predictions = np.array(predictions)
@@ -1136,6 +1177,7 @@ def run_lstm_model(
     clip_outliers=DEFAULT_CLIP_OUTLIERS,
     outlier_clip_factor=DEFAULT_OUTLIER_CLIP_FACTOR,
     restore_best_model=DEFAULT_RESTORE_BEST_MODEL,
+    use_gap_aware_segments=DEFAULT_USE_GAP_AWARE_SEGMENTS,
     show_prediction_plot=True,
     use_scattering=DEFAULT_USE_SCATTERING,
     scattering_j=DEFAULT_SCATTERING_J,
@@ -1160,7 +1202,7 @@ def run_lstm_model(
     print("Clip outliers:", clip_outliers)
     print("Outlier clip factor:", outlier_clip_factor)
     print("Restore best validation checkpoint:", restore_best_model)
-    print("Gap-aware sequence generation:", True)
+    print("Gap-aware sequence generation:", use_gap_aware_segments)
     print("Use scattering:", use_scattering)
     if use_scattering:
         print("Scattering J:", scattering_j)
@@ -1186,6 +1228,7 @@ def run_lstm_model(
         drop_short_stations=drop_short_stations,
         clip_outliers=clip_outliers,
         outlier_clip_factor=outlier_clip_factor,
+        use_gap_aware_segments=use_gap_aware_segments,
         use_scattering=use_scattering,
         scattering_j=scattering_j,
         scattering_q=scattering_q,
@@ -1215,6 +1258,7 @@ def run_lstm_model(
         drop_short_stations=drop_short_stations,
         clip_outliers=clip_outliers,
         restore_best_model=restore_best_model,
+        use_gap_aware_segments=use_gap_aware_segments,
         use_scattering=use_scattering,
         scattering_j=scattering_j,
         scattering_q=scattering_q,
@@ -1325,7 +1369,7 @@ def run_lstm_model(
         "clip_outliers": clip_outliers,
         "outlier_clip_factor": outlier_clip_factor,
         "restore_best_model": restore_best_model,
-        "gap_aware_sequences": True,
+        "gap_aware_sequences": use_gap_aware_segments,
         "use_scattering": use_scattering,
         "scattering_j": scattering_j,
         "scattering_q": scattering_q,

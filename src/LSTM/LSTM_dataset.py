@@ -17,6 +17,7 @@ from src.LSTM.LSTM_config import (
     DEFAULT_RESAMPLE_TIME,
     DEFAULT_SCATTERING_J,
     DEFAULT_SCATTERING_Q,
+    DEFAULT_USE_GAP_AWARE_SEGMENTS,
     DEFAULT_USE_SCATTERING,
     SEGMENT_COLUMN,
     STATION_COLUMN,
@@ -215,6 +216,7 @@ def prepare_lstm_data(
     drop_short_stations=DEFAULT_DROP_SHORT_STATIONS,
     clip_outliers=DEFAULT_CLIP_OUTLIERS,
     outlier_clip_factor=DEFAULT_OUTLIER_CLIP_FACTOR,
+    use_gap_aware_segments=DEFAULT_USE_GAP_AWARE_SEGMENTS,
     use_scattering=DEFAULT_USE_SCATTERING,
     scattering_j=DEFAULT_SCATTERING_J,
     scattering_q=DEFAULT_SCATTERING_Q,
@@ -241,10 +243,14 @@ def prepare_lstm_data(
 
     print("\n========== Data Gap Handling ==========")
     print("Expected timestamp interval:", resample_time)
+    print("Gap-aware sequence generation:", use_gap_aware_segments)
     # max_fill_steps is kept in the config for folder naming/backward
     # compatibility, but the N-BEATS-matched missing-value step interpolates
     # after resampling instead of doing limited gap filling.
-    print("Sequences crossing detected timestamp gaps: disabled")
+    print(
+        "Sequences crossing detected timestamp gaps:",
+        "disabled" if use_gap_aware_segments else "allowed"
+    )
 
     df = fill_missing_dataframe(
         df,
@@ -253,7 +259,8 @@ def prepare_lstm_data(
         station_column=STATION_COLUMN,
         segment_column=SEGMENT_COLUMN,
         resample_time=resample_time,
-        max_fill_steps=max_fill_steps
+        max_fill_steps=max_fill_steps,
+        use_gap_aware_segments=use_gap_aware_segments
     )
 
     if clip_outliers:
@@ -279,24 +286,29 @@ def prepare_lstm_data(
     val_df = add_time_features(val_df)
     test_df = add_time_features(test_df)
 
-    train_df = add_continuous_segments(
-        train_df,
-        station_column=STATION_COLUMN,
-        segment_column=SEGMENT_COLUMN,
-        resample_time=resample_time
-    )
-    val_df = add_continuous_segments(
-        val_df,
-        station_column=STATION_COLUMN,
-        segment_column=SEGMENT_COLUMN,
-        resample_time=resample_time
-    )
-    test_df = add_continuous_segments(
-        test_df,
-        station_column=STATION_COLUMN,
-        segment_column=SEGMENT_COLUMN,
-        resample_time=resample_time
-    )
+    if use_gap_aware_segments:
+        train_df = add_continuous_segments(
+            train_df,
+            station_column=STATION_COLUMN,
+            segment_column=SEGMENT_COLUMN,
+            resample_time=resample_time
+        )
+        val_df = add_continuous_segments(
+            val_df,
+            station_column=STATION_COLUMN,
+            segment_column=SEGMENT_COLUMN,
+            resample_time=resample_time
+        )
+        test_df = add_continuous_segments(
+            test_df,
+            station_column=STATION_COLUMN,
+            segment_column=SEGMENT_COLUMN,
+            resample_time=resample_time
+        )
+    else:
+        train_df[SEGMENT_COLUMN] = 0
+        val_df[SEGMENT_COLUMN] = 0
+        test_df[SEGMENT_COLUMN] = 0
 
     print("\n========== Future Target Reference ==========")
     print(
