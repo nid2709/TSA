@@ -127,7 +127,8 @@ def run_pipeline():
         uq_results = run_mc_dropout_uq(
             lstm_results,
             n_samples=100,
-            batch_size=256
+            batch_size=256,
+            max_plot_points=2000
         )
         uq_elapsed_time = time.perf_counter() - uq_start_time
 

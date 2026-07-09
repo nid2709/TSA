@@ -124,7 +124,10 @@ def run_pipeline():
         from src.CNN_LSTM.CNN_LSTM_UQ import run_mc_dropout_uq
 
         mc_start_time = time.perf_counter()
-        uq_results = run_mc_dropout_uq(cnn_results)
+        uq_results = run_mc_dropout_uq(
+            cnn_results,
+            max_plot_points=2000
+        )
         mc_elapsed_time = time.perf_counter() - mc_start_time
 
         print("\n========== MC DROPOUT FINISHED ==========")

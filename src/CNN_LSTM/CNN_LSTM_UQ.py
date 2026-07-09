@@ -11,6 +11,7 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 from src.CNN_LSTM.CNN_LSTM_config import get_cnn_lstm_results_dir
 
@@ -75,7 +76,18 @@ def mc_dropout_predict(
     mean_predictions = mc_predictions.mean(axis=0)
     std_predictions = mc_predictions.std(axis=0)
 
+    model.eval()
+
     return mean_predictions, std_predictions, mc_predictions
+
+
+def calculate_uq_metrics(actuals, predictions):
+    mse = mean_squared_error(actuals.flatten(), predictions.flatten())
+    mae = mean_absolute_error(actuals.flatten(), predictions.flatten())
+    rmse = np.sqrt(mse)
+    r2 = r2_score(actuals.flatten(), predictions.flatten())
+
+    return mse, mae, rmse, r2
 
 
 def plot_mc_dropout_uncertainty(
@@ -190,7 +202,7 @@ def run_mc_dropout_uq(
     cnn_lstm_results,
     n_samples=100,
     batch_size=256,
-    max_plot_points=1000
+    max_plot_points=2000
 ):
     """
     Main function to run MC Dropout UQ using results from run_cnn_lstm_model().
@@ -217,6 +229,39 @@ def run_mc_dropout_uq(
         n_samples=n_samples,
         batch_size=batch_size
     )
+
+    deterministic_predictions = cnn_lstm_results.get("predictions")
+
+    if deterministic_predictions is not None:
+        (
+            det_mse,
+            det_mae,
+            det_rmse,
+            det_r2
+        ) = calculate_uq_metrics(actuals, deterministic_predictions)
+        (
+            mc_mse,
+            mc_mae,
+            mc_rmse,
+            mc_r2
+        ) = calculate_uq_metrics(actuals, mean_predictions)
+
+        print("\n========== MC DROPOUT DIAGNOSTIC ==========")
+        print(
+            "Deterministic prediction -> "
+            f"MSE: {det_mse:.6f}, MAE: {det_mae:.6f}, "
+            f"RMSE: {det_rmse:.6f}, R2: {det_r2:.6f}"
+        )
+        print(
+            "MC mean prediction      -> "
+            f"MSE: {mc_mse:.6f}, MAE: {mc_mae:.6f}, "
+            f"RMSE: {mc_rmse:.6f}, R2: {mc_r2:.6f}"
+        )
+        print(
+            "Mean absolute difference between deterministic "
+            "prediction and MC mean:",
+            np.mean(np.abs(deterministic_predictions - mean_predictions))
+        )
 
     avg_uncertainty = np.mean(std_predictions)
     max_uncertainty = np.max(std_predictions)
