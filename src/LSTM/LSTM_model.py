@@ -1,6 +1,13 @@
 import copy
 import os
 
+MPL_CONFIG_DIR = os.path.join(
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")),
+    ".matplotlib"
+)
+os.makedirs(MPL_CONFIG_DIR, exist_ok=True)
+os.environ.setdefault("MPLCONFIGDIR", MPL_CONFIG_DIR)
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd

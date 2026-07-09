@@ -29,7 +29,7 @@ from src.CNN_LSTM.CNN_LSTM_model import (
 )
 
 
-MAX_DEEP_ENSEMBLE_PLOT_POINTS = 10000
+MAX_DEEP_ENSEMBLE_PLOT_POINTS = 1000
 
 
 def set_seed(seed):

@@ -1,5 +1,12 @@
 import os
 
+MPL_CONFIG_DIR = os.path.join(
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")),
+    ".matplotlib"
+)
+os.makedirs(MPL_CONFIG_DIR, exist_ok=True)
+os.environ.setdefault("MPLCONFIGDIR", MPL_CONFIG_DIR)
+
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
@@ -13,6 +20,7 @@ from src.CNN_LSTM.CNN_LSTM_config import (
     get_cnn_lstm_results_dir,
     get_target_label,
 )
+from src.CNN_LSTM.CNN_LSTM_scattering import get_scattering_feature_names
 
 
 def plot_loss_curves(train_losses, val_losses, results_dir=None):
@@ -52,6 +60,17 @@ def plot_scattering_wavelet_features(
     scattering_feature_names = get_scattering_feature_names(
         n_scattering_features
     )
+    missing_features = [
+        feature_name for feature_name in scattering_feature_names
+        if feature_name not in model_features
+    ]
+    if missing_features:
+        print(
+            "Scattering wavelet plot skipped. Missing scattering features:",
+            missing_features
+        )
+        return None
+
     scattering_indices = [
         model_features.index(feature_name)
         for feature_name in scattering_feature_names
@@ -125,14 +144,16 @@ def plot_attention_weights(model, test_loader, results_dir):
 
     model.eval()
     X_batch, _ = next(iter(test_loader))
+    device = next(model.parameters()).device
+    X_sample = X_batch[0:1].to(device)
 
     with torch.no_grad():
-        _, attention_weights = model.forward_with_attention(X_batch[0:1])
+        _, attention_weights = model.forward_with_attention(X_sample)
 
     if attention_weights is None:
         return None
 
-    weights_matrix = attention_weights[0].cpu().numpy()
+    weights_matrix = attention_weights[0].detach().cpu().numpy()
     final_query_weights = weights_matrix[-1]
 
     main_plots_dir = os.path.join(results_dir, "main_plots")

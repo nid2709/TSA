@@ -27,11 +27,11 @@ TARGET = 'scd41_co2'
 STATION_COLUMN = 'station_id'
 SEGMENT_COLUMN = '_continuous_segment_id'
 
-DEFAULT_INPUT_SEQ_LENGTH = 192
-DEFAULT_OUTPUT_SEQ_LENGTH = 6
+DEFAULT_INPUT_SEQ_LENGTH = 96
+DEFAULT_OUTPUT_SEQ_LENGTH = 1
 DEFAULT_BATCH_SIZE = 64
-DEFAULT_EPOCHS = 15
-DEFAULT_LEARNING_RATE = 0.00005
+DEFAULT_EPOCHS = 10
+DEFAULT_LEARNING_RATE = 0.00003
 DEFAULT_HIDDEN_SIZE = 128
 DEFAULT_RESAMPLE_TIME = '15min'
 DEFAULT_DROPOUT_RATE = 0.2
@@ -45,6 +45,7 @@ DEFAULT_OUTLIER_CLIP_FACTOR = 1.5
 DEFAULT_RESTORE_BEST_MODEL = True
 DEFAULT_DEVICE = "mps"
 DEFAULT_USE_GAP_AWARE_SEGMENTS = False
+DEFAULT_USE_STATION_ONE_HOT = True
 
 DEFAULT_USE_SCATTERING = False
 DEFAULT_SCATTERING_J = 4
@@ -99,6 +100,7 @@ def get_lstm_results_dir(
     clip_outliers=DEFAULT_CLIP_OUTLIERS,
     restore_best_model=DEFAULT_RESTORE_BEST_MODEL,
     use_gap_aware_segments=DEFAULT_USE_GAP_AWARE_SEGMENTS,
+    use_station_one_hot=DEFAULT_USE_STATION_ONE_HOT,
     use_scattering=DEFAULT_USE_SCATTERING,
     scattering_j=DEFAULT_SCATTERING_J,
     scattering_q=DEFAULT_SCATTERING_Q,
@@ -126,6 +128,7 @@ def get_lstm_results_dir(
         f"CLP{int(clip_outliers)}_"
         f"RB{int(restore_best_model)}_"
         f"GAP{int(use_gap_aware_segments)}_"
+        f"SOH{int(use_station_one_hot)}_"
         f"SWT{int(use_scattering)}_"
         f"SWJ{scattering_j if use_scattering else 0}_"
         f"SWQ{scattering_q if use_scattering else 0}_"

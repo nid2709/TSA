@@ -13,22 +13,23 @@ import torch
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 
-from src.LSTM.LSTM_co2 import (
-    LSTMModel,
-    train_model,
-    evaluate_model,
-    plot_loss_curves,
-    get_lstm_results_dir,
+from src.LSTM.LSTM_config import (
     DEFAULT_HIDDEN_SIZE,
     DEFAULT_NUM_LAYERS,
     DEFAULT_DROPOUT_RATE,
     DEFAULT_LEARNING_RATE,
     DEFAULT_WEIGHT_DECAY,
     DEFAULT_RESTORE_BEST_MODEL,
+    get_lstm_results_dir,
+)
+from src.LSTM.LSTM_model import (
+    LSTMModel,
+    evaluate_model,
+    train_model,
 )
 
 
-MAX_DEEP_ENSEMBLE_PLOT_POINTS = 10000
+MAX_DEEP_ENSEMBLE_PLOT_POINTS = 1000
 
 
 def set_seed(seed):
@@ -182,7 +183,7 @@ def run_deep_ensemble_uq(
             output_seq_length=output_seq_length,
             hidden_size=hidden_size,
             num_layers=num_layers,
-            dropout_rate=dropout_rate
+            dropout=dropout_rate
         )
 
         model, train_losses, val_losses = train_model(

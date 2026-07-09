@@ -1,4 +1,5 @@
 import os
+import copy
 
 MPL_CONFIG_DIR = os.path.join(
     os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")),
@@ -15,11 +16,11 @@ from sklearn.metrics import mean_squared_error
 from captum.attr import IntegratedGradients
 
 from src.LSTM.dataLoad import load_prepare_data
-from src.LSTM.LSTM_co2 import (
-    run_lstm_model,
+from src.LSTM.LSTM_config import (
     get_lstm_results_dir,
     DEFAULT_OUTPUT_SEQ_LENGTH
 )
+from src.LSTM.LSTM_co2 import run_lstm_model
 
 # This helper is for SHAP Explainability because different SHAP versions can
 # return multi-output values as either samples-first or outputs-first arrays.
@@ -83,12 +84,15 @@ def run_shap_experiment(results=None):
     print("\nBackground shape:", background.shape)
     print("Test samples shape:", test_samples.shape)
 
-    model.eval()
+    # SHAP GradientExplainer is most stable on CPU. The original trained model
+    # can stay on MPS/CUDA for PFI and Integrated Gradients below.
+    shap_model = copy.deepcopy(model).cpu()
+    shap_model.eval()
 
     print("\nCreating SHAP GradientExplainer for LSTM...")
 
     explainer = shap.GradientExplainer(
-        model,
+        shap_model,
         background
     )
 
@@ -150,6 +154,9 @@ def run_shap_experiment(results=None):
     #plt.show()
     plt.close()
 
+    del shap_values, mean_abs_shap, explainer, background, test_samples
+    del shap_model
+
     # for PFI
     actuals = results["actuals"]
 
@@ -160,7 +167,9 @@ def run_shap_experiment(results=None):
         X_test=X_test,
         actuals=actuals,
         feature_names=feature_names,
-        results_dir=results_dir
+        results_dir=results_dir,
+        max_samples=2000,
+        batch_size=256
     )
 
     # for IG - compare first forecast step with final output horizon only
@@ -180,7 +189,7 @@ def run_shap_experiment(results=None):
             X_test=X_test,
             feature_names=feature_names,
             forecast_step=horizon,
-            num_samples=100,
+            num_samples=32,
             results_dir=results_dir
         )
 
@@ -197,17 +206,27 @@ def run_pfi_analysis(
     X_test,
     actuals,
     feature_names,
-    results_dir=None
+    results_dir=None,
+    max_samples=2000,
+    batch_size=256
 ):
 
     print("\n========== PERMUTATION FEATURE IMPORTANCE ==========")
 
     model.eval()
 
-    X_test_tensor = torch.tensor(X_test, dtype=torch.float32)
+    if max_samples is not None and len(X_test) > max_samples:
+        X_test = X_test[:max_samples]
+        actuals = actuals[:max_samples]
 
-    with torch.no_grad():
-        baseline_predictions = model(X_test_tensor).numpy()
+    print("PFI samples used:", len(X_test))
+    print("PFI batch size:", batch_size)
+
+    baseline_predictions = predict_in_batches(
+        model,
+        X_test,
+        batch_size=batch_size
+    )
 
     baseline_rmse = np.sqrt(
         mean_squared_error(
@@ -229,13 +248,11 @@ def run_pfi_analysis(
         np.random.shuffle(shuffled_values)
         X_permuted[:, :, feature_index] = shuffled_values
 
-        X_permuted_tensor = torch.tensor(
+        permuted_predictions = predict_in_batches(
+            model,
             X_permuted,
-            dtype=torch.float32
+            batch_size=batch_size
         )
-
-        with torch.no_grad():
-            permuted_predictions = model(X_permuted_tensor).numpy()
 
         permuted_rmse = np.sqrt(
             mean_squared_error(
@@ -317,13 +334,32 @@ def run_pfi_analysis(
     return pfi_results
 #============================== END:PFI FOR LSTM ===============================
 
+
+def predict_in_batches(model, X_values, batch_size=256):
+    predictions = []
+    device = next(model.parameters()).device
+
+    with torch.no_grad():
+        for start_index in range(0, len(X_values), batch_size):
+            end_index = start_index + batch_size
+            X_batch = torch.tensor(
+                X_values[start_index:end_index],
+                dtype=torch.float32
+            ).to(device)
+            batch_predictions = model(X_batch).cpu().numpy()
+            predictions.append(batch_predictions)
+
+    return np.concatenate(predictions, axis=0)
+
 #============================== START:INTEGRATED GRADIENTS FOR LSTM =============================
 def run_integrated_gradients_analysis(
     model,
     X_test,
     feature_names,
     forecast_step=1,
-    num_samples=100,
+    num_samples=32,
+    n_steps=20,
+    internal_batch_size=None,
     max_plot_points=None,
     results_dir=None
 ):
@@ -331,8 +367,12 @@ def run_integrated_gradients_analysis(
     print("\n========== INTEGRATED GRADIENTS ==========")
 
     model.eval()
+    device = next(model.parameters()).device
 
     step_index = forecast_step - 1
+    num_samples = min(num_samples, len(X_test))
+    if internal_batch_size is None:
+        internal_batch_size = num_samples
 
     class ForecastStepWrapper(torch.nn.Module):
         def __init__(self, model, step_index):
@@ -347,7 +387,7 @@ def run_integrated_gradients_analysis(
     wrapped_model = ForecastStepWrapper(
         model,
         step_index
-    )
+    ).to(device)
 
     integrated_gradients = IntegratedGradients(
         wrapped_model
@@ -356,21 +396,24 @@ def run_integrated_gradients_analysis(
     input_tensor = torch.tensor(
         X_test[:num_samples],
         dtype=torch.float32
-    )
+    ).to(device)
 
     baseline = torch.zeros_like(input_tensor)
 
     print("Input tensor shape:", input_tensor.shape)
     print("Baseline shape:", baseline.shape)
     print(f"Explaining forecast step: {forecast_step}")
+    print("IG steps:", n_steps)
+    print("IG internal batch size:", internal_batch_size)
 
     attributions = integrated_gradients.attribute(
         input_tensor,
         baselines=baseline,
-        n_steps=50
+        n_steps=n_steps,
+        internal_batch_size=internal_batch_size
     )
 
-    attributions = attributions.detach().numpy()
+    attributions = attributions.detach().cpu().numpy()
 
     print("Attributions shape:", attributions.shape)
 

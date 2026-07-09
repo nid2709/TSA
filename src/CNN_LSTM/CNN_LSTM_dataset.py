@@ -18,6 +18,7 @@ from src.CNN_LSTM.CNN_LSTM_config import (
     DEFAULT_SCATTERING_J,
     DEFAULT_SCATTERING_Q,
     DEFAULT_USE_GAP_AWARE_SEGMENTS,
+    DEFAULT_USE_STATION_ONE_HOT,
     DEFAULT_USE_SCATTERING,
     SEGMENT_COLUMN,
     STATION_COLUMN,
@@ -217,6 +218,7 @@ def prepare_cnn_lstm_data(
     clip_outliers=DEFAULT_CLIP_OUTLIERS,
     outlier_clip_factor=DEFAULT_OUTLIER_CLIP_FACTOR,
     use_gap_aware_segments=DEFAULT_USE_GAP_AWARE_SEGMENTS,
+    use_station_one_hot=DEFAULT_USE_STATION_ONE_HOT,
     use_scattering=DEFAULT_USE_SCATTERING,
     scattering_j=DEFAULT_SCATTERING_J,
     scattering_q=DEFAULT_SCATTERING_Q,
@@ -326,28 +328,35 @@ def prepare_cnn_lstm_data(
     )
     print("Future target reference shape:", future_target_reference.shape)
 
-    train_df = add_station_features(
-        train_df,
-        station_ids,
-        station_column=STATION_COLUMN
-    )
-    val_df = add_station_features(
-        val_df,
-        station_ids,
-        station_column=STATION_COLUMN
-    )
-    test_df = add_station_features(
-        test_df,
-        station_ids,
-        station_column=STATION_COLUMN
-    )
+    print("\n========== Station Feature Encoding ==========")
+    print("Use station one-hot features:", use_station_one_hot)
 
-    station_features = [
-        f"station_{station_id}"
-        for station_id in station_ids
-    ]
+    if use_station_one_hot:
+        train_df = add_station_features(
+            train_df,
+            station_ids,
+            station_column=STATION_COLUMN
+        )
+        val_df = add_station_features(
+            val_df,
+            station_ids,
+            station_column=STATION_COLUMN
+        )
+        test_df = add_station_features(
+            test_df,
+            station_ids,
+            station_column=STATION_COLUMN
+        )
 
-    # Model features include station one-hot columns for Explainability plots.
+        station_features = [
+            f"station_{station_id}"
+            for station_id in station_ids
+        ]
+        print("Station one-hot features:", station_features)
+    else:
+        station_features = []
+        print("Station one-hot features: disabled")
+
     # station_id itself is still only used for splitting/window creation.
     model_features = BASE_FEATURES + station_features
 

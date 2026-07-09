@@ -21,9 +21,9 @@ from src.CNN_LSTM.CNN_LSTM_co2 import (
 )
 
 
-RUN_EXPLAINABILITY = False
-RUN_MC_DROPOUT = False
-RUN_DEEP_ENSEMBLE = False
+RUN_EXPLAINABILITY = True
+RUN_MC_DROPOUT = True
+RUN_DEEP_ENSEMBLE = True
 SAVE_EDA_PLOTS = False
 
 
@@ -67,6 +67,7 @@ def run_pipeline():
     print("Clip outliers:", cnn_results["clip_outliers"])
     print("Outlier clip factor:", cnn_results["outlier_clip_factor"])
     print("Restore best validation checkpoint:", cnn_results["restore_best_model"])
+    print("Use station one-hot encoding:", cnn_results["use_station_one_hot"])
 
     print("\n========== CNN-LSTM VS CNN-LSTM + SCATTERING TAGS ==========")
     print("Use scattering:", cnn_results["use_scattering"])
@@ -95,11 +96,18 @@ def run_pipeline():
             "\nEDA plots skipped. Set SAVE_EDA_PLOTS=True to save all EDA plots."
         )
 
+    explainability_results = None
+    uq_results = None
+    deep_ensemble_results = None
+    explainability_elapsed_time = 0
+    mc_elapsed_time = 0
+    ensemble_elapsed_time = 0
+
     if RUN_EXPLAINABILITY:
         from src.CNN_LSTM.CNN_LSTM_explainability import run_shap_experiment
 
         explainability_start_time = time.perf_counter()
-        run_shap_experiment(cnn_results)
+        explainability_results = run_shap_experiment(cnn_results)
         explainability_elapsed_time = (
             time.perf_counter() - explainability_start_time
         )
@@ -116,7 +124,7 @@ def run_pipeline():
         from src.CNN_LSTM.CNN_LSTM_UQ import run_mc_dropout_uq
 
         mc_start_time = time.perf_counter()
-        run_mc_dropout_uq(cnn_results)
+        uq_results = run_mc_dropout_uq(cnn_results)
         mc_elapsed_time = time.perf_counter() - mc_start_time
 
         print("\n========== MC DROPOUT FINISHED ==========")
@@ -128,7 +136,7 @@ def run_pipeline():
         from src.CNN_LSTM.CNN_LSTM_DeepEnsemble import run_deep_ensemble_uq
 
         ensemble_start_time = time.perf_counter()
-        run_deep_ensemble_uq(
+        deep_ensemble_results = run_deep_ensemble_uq(
             cnn_results["train_loader"],
             cnn_results["val_loader"],
             cnn_results["test_loader"],
@@ -154,8 +162,25 @@ def run_pipeline():
 
     pipeline_elapsed_time = time.perf_counter() - pipeline_start_time
 
-    print("\n========== PIPELINE FINISHED ==========")
+    print("\n========== PIPELINE RUNTIME SUMMARY ==========")
+    print("CNN-LSTM runtime:", format_elapsed_time(cnn_elapsed_time))
+    print(
+        "Explainability runtime:",
+        format_elapsed_time(explainability_elapsed_time)
+    )
+    print("MC Dropout runtime:", format_elapsed_time(mc_elapsed_time))
+    print(
+        "Deep Ensemble runtime:",
+        format_elapsed_time(ensemble_elapsed_time)
+    )
     print("Total pipeline runtime:", format_elapsed_time(pipeline_elapsed_time))
+
+    return (
+        cnn_results,
+        explainability_results,
+        uq_results,
+        deep_ensemble_results
+    )
 
 
 if __name__ == "__main__":

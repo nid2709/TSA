@@ -42,6 +42,7 @@ def mc_dropout_predict(
     """
 
     mc_predictions = []
+    device = next(model.parameters()).device
 
     with torch.no_grad():
 
@@ -56,7 +57,7 @@ def mc_dropout_predict(
                 X_batch = torch.tensor(
                     X_test[start_index:end_index],
                     dtype=torch.float32
-                )
+                ).to(device)
                 batch_predictions = model(X_batch).cpu().numpy()
                 sample_predictions.append(batch_predictions)
 
@@ -188,7 +189,8 @@ def plot_mc_dropout_uncertainty(
 def run_mc_dropout_uq(
     cnn_lstm_results,
     n_samples=100,
-    batch_size=256
+    batch_size=256,
+    max_plot_points=1000
 ):
     """
     Main function to run MC Dropout UQ using results from run_cnn_lstm_model().
@@ -207,6 +209,7 @@ def run_mc_dropout_uq(
     print("\n========== STARTING MONTE CARLO DROPOUT UQ ==========")
     print("MC samples:", n_samples)
     print("MC batch size:", batch_size)
+    print("MC plot max points:", max_plot_points)
 
     mean_predictions, std_predictions, mc_predictions = mc_dropout_predict(
         model,
@@ -233,6 +236,7 @@ def run_mc_dropout_uq(
         mean_predictions,
         std_predictions,
         forecast_step=1,
+        max_plot_points=max_plot_points,
         target_label=target_label,
         results_dir=results_dir
     )
@@ -243,6 +247,7 @@ def run_mc_dropout_uq(
             mean_predictions,
             std_predictions,
             forecast_step=output_seq_length,
+            max_plot_points=max_plot_points,
             target_label=target_label,
             results_dir=results_dir
         )

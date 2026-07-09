@@ -66,6 +66,7 @@ def run_pipeline():
     print("Clip outliers:", lstm_results["clip_outliers"])
     print("Outlier clip factor:", lstm_results["outlier_clip_factor"])
     print("Restore best validation checkpoint:", lstm_results["restore_best_model"])
+    print("Use station one-hot encoding:", lstm_results["use_station_one_hot"])
 
     print("\n========== LSTM VS LSTM + SCATTERING TAGS ==========")
     print("Use scattering:", lstm_results["use_scattering"])
