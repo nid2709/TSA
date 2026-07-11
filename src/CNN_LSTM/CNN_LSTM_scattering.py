@@ -13,6 +13,7 @@ except ImportError:
 
 
 def get_scattering_feature_names(n_scattering_features):
+    # Creates stable names for appended scattering wavelet feature columns.
     return [
         f"scatter_co2_{i + 1}"
         for i in range(n_scattering_features)
@@ -23,6 +24,7 @@ def build_scattering_transform(
     scattering_j=DEFAULT_SCATTERING_J,
     scattering_q=DEFAULT_SCATTERING_Q
 ):
+    # Builds the Kymatio 1D scattering transform used for CO2 signal features.
     if Scattering1D is None:
         raise ImportError(
             "Kymatio is required for scattering wavelet features. "
@@ -40,6 +42,7 @@ def compute_static_scattering_features(
     scattering_transform,
     n_scattering_features=DEFAULT_N_SCATTERING_FEATURES
 ):
+    # Converts one CO2 input window into a fixed-length scattering feature vector.
     signal_window = np.asarray(signal_window, dtype=np.float32)
     scattering_coefficients = scattering_transform(signal_window)
     scattering_coefficients = np.asarray(scattering_coefficients)

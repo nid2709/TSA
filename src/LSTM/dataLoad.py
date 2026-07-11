@@ -19,6 +19,7 @@ PCA_FEATURES = [
 
 
 def load_prepare_data(csv_path="data/indoorAir2.csv"):
+    # Loads the raw indoor air CSV and prepares timestamp ordering for time series use.
     df = pd.read_csv(csv_path)
 
     # --------------------------------------------------
@@ -53,6 +54,7 @@ def load_prepare_data(csv_path="data/indoorAir2.csv"):
 
 
 def get_eda_plots_dir(results_dir):
+    # Creates and returns the folder used for EDA plot outputs.
     eda_dir = os.path.join(results_dir, "eda_plots")
     os.makedirs(eda_dir, exist_ok=True)
     return eda_dir
@@ -65,6 +67,7 @@ def plot_time_series(
     target_column='scd41_co2',
     target_label='CO2'
 ):
+    # Plots the selected target variable over time for EDA review.
     if target_column not in df.columns:
         raise ValueError(f"Target column '{target_column}' not found in dataframe.")
 
@@ -93,6 +96,7 @@ def plot_time_series(
 
 
 def plot_heatmap(df, results_dir=None):
+    # Plots numeric feature correlations to inspect relationships between sensors.
     corr = df.select_dtypes(include=['float64', 'int64']).corr()
     fig, ax = plt.subplots(figsize=(12, 8))
     sns.heatmap(
@@ -119,6 +123,7 @@ def plot_heatmap(df, results_dir=None):
 
 
 def plot_pca_analysis(df, results_dir=None):
+    # Runs PCA on selected sensor features and plots cumulative explained variance.
     numerical_df = df[PCA_FEATURES].copy()
 
     # --------------------------------------------------

@@ -27,9 +27,9 @@ TARGET = 'scd41_co2'
 STATION_COLUMN = 'station_id'
 SEGMENT_COLUMN = '_continuous_segment_id'
 
-DEFAULT_INPUT_SEQ_LENGTH = 96
+DEFAULT_INPUT_SEQ_LENGTH = 192
 DEFAULT_OUTPUT_SEQ_LENGTH = 1
-DEFAULT_BATCH_SIZE = 64
+DEFAULT_BATCH_SIZE = 32
 DEFAULT_EPOCHS = 10
 DEFAULT_LEARNING_RATE = 0.00003
 DEFAULT_HIDDEN_SIZE = 128
@@ -56,6 +56,7 @@ DEFAULT_USE_ATTENTION = False
 
 
 def get_target_label(target_column):
+    # Converts internal target column names into readable labels for plots and logs.
     target_labels = {
         'scd41_co2': 'CO2',
         'scd41_temperature': 'Temperature',
@@ -73,6 +74,7 @@ def get_target_label(target_column):
 
 
 def format_elapsed_time(seconds):
+    # Converts runtime seconds into a readable hours/minutes/seconds string.
     minutes, remaining_seconds = divmod(seconds, 60)
     hours, minutes = divmod(minutes, 60)
 
@@ -108,6 +110,7 @@ def get_cnn_lstm_results_dir(
     n_scattering_features=DEFAULT_N_SCATTERING_FEATURES,
     use_attention=DEFAULT_USE_ATTENTION
 ):
+    # Builds a unique results folder name from the active CNN-LSTM settings.
     project_root = os.path.abspath(
         os.path.join(os.path.dirname(__file__), "..", "..")
     )

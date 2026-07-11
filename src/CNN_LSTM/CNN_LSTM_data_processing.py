@@ -6,6 +6,7 @@ from sklearn.preprocessing import MinMaxScaler
 
 
 def add_time_features(df):
+    # Adds cyclical time columns so the model can learn hour and weekday patterns.
     df = df.copy()
 
     if "timestamp" in df.columns:
@@ -33,6 +34,7 @@ def preprocess_data(
     station_column,
     resample_time
 ):
+    # Selects usable columns, removes station 6, resamples data, and adds time features.
     df = df.copy()
 
     print("\n========== Feature Selecting ==========")
@@ -107,6 +109,7 @@ def train_val_test_spliting(
     val_ratio=0.15,
     test_ratio=0.15
 ):
+    # Splits each station chronologically into train, validation, and test rows.
     print("\n========== Train, Validation and Test ==========")
 
     feature_df = feature_df.copy()
@@ -178,67 +181,6 @@ def train_val_test_spliting(
     return train_df, val_df, test_df
 
 
-# Reference only. This pre-split station filter is disabled so CNN-LSTM
-# preprocessing matches the N-BEATS row counts. Window creation still skips
-# individual continuous segments that are too short.
-# def drop_short_stations_for_windowing(
-#     feature_df,
-#     station_column,
-#     input_seq_length,
-#     output_seq_length
-# ):
-#     feature_df = feature_df.copy()
-#
-#     if "timestamp" not in feature_df.columns:
-#         feature_df["timestamp"] = feature_df.index
-#
-#     required_rows = input_seq_length + output_seq_length + 1
-#     station_counts = feature_df.groupby(station_column).size()
-#     keep_station_ids = station_counts[
-#         station_counts >= required_rows
-#     ].index.tolist()
-#     dropped_station_ids = station_counts[
-#         station_counts < required_rows
-#     ].index.tolist()
-#
-#     print("\n========== SHORT STATION FILTER ==========")
-#     print("Required rows per station:", required_rows)
-#     print("Stations kept:", keep_station_ids)
-#     print("Stations removed:", dropped_station_ids)
-#
-#     if len(keep_station_ids) == 0:
-#         raise ValueError(
-#             "No station has enough rows for the selected input/output window."
-#         )
-#
-#     return (
-#         feature_df[feature_df[station_column].isin(keep_station_ids)]
-#         .copy()
-#         .reset_index(drop=True)
-#     )
-
-
-# Reference only. This limited gap-fill helper is not used in the active
-# N-BEATS-matched preprocessing path, where missing values are handled by
-# station-wise interpolation after resampling.
-# def fill_short_feature_gaps(series, max_fill_steps):
-#     if max_fill_steps <= 0 or not series.isna().any():
-#         return series
-#
-#     missing_mask = series.isna()
-#     run_ids = missing_mask.ne(missing_mask.shift()).cumsum()
-#     missing_run_lengths = missing_mask.groupby(run_ids).transform("sum")
-#     short_gap_mask = missing_mask & (
-#         missing_run_lengths <= max_fill_steps
-#     )
-#
-#     nearby_values = series.ffill().bfill()
-#     filled_series = series.copy()
-#     filled_series.loc[short_gap_mask] = nearby_values.loc[short_gap_mask]
-#
-#     return filled_series
-
-
 def fill_missing_dataframe(
     df,
     base_features,
@@ -248,6 +190,7 @@ def fill_missing_dataframe(
     resample_time,
     max_fill_steps
 ):
+    # Interpolates selected missing sensor values within each station after resampling.
     print("\n========== Missing Values ==========")
     df = df.copy()
     df = df.sort_values([station_column, "timestamp"]).reset_index(drop=True)
@@ -281,6 +224,7 @@ def add_continuous_segments(
     segment_column,
     resample_time
 ):
+    # Marks continuous timestamp segments so windows can avoid crossing large gaps.
     segmented_parts = []
     expected_interval = pd.Timedelta(resample_time)
     expected_interval_seconds = expected_interval.total_seconds()
@@ -305,6 +249,7 @@ def add_continuous_segments(
 
 
 def add_station_features(df, station_ids, station_column):
+    # Adds one-hot station columns so the model can learn station-specific behavior.
     df = df.copy()
 
     for station_id in station_ids:
@@ -320,6 +265,7 @@ def clip_outliers_dataframe(
     numeric_columns,
     clip_factor
 ):
+    # Clips numeric feature outliers with the IQR rule before model training.
     print("\n========== Clipping Outliers ==========")
     print("Clip factor:", clip_factor)
 
@@ -340,6 +286,7 @@ def clip_outliers_dataframe(
 
 
 def scale_data(train_df, val_df, test_df, model_features, target_column):
+    # Fits MinMaxScaler on train data and applies the same scaling to all splits.
     scaler = MinMaxScaler()
 
     scaler.fit(train_df[model_features])
@@ -376,6 +323,7 @@ def add_future_target_columns(
     station_column,
     segment_column=None
 ):
+    # Creates ahead target columns for checking future labels outside model inputs.
     data = data.copy()
 
     group_columns = [station_column]
@@ -405,6 +353,7 @@ def build_future_target_reference(
     segment_column=None,
     max_rows_per_split=1000
 ):
+    # Builds a compact table showing current target values and future target steps.
     reference_parts = []
 
     split_frames = {
@@ -443,6 +392,7 @@ def save_future_target_reference(
     future_target_reference,
     results_dir
 ):
+    # Saves the future-target reference table for later inspection with plots.
     if future_target_reference is None or len(future_target_reference) == 0:
         return None
 

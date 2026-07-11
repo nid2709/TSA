@@ -4,7 +4,7 @@ import os
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 from src.LSTM.dataLoad import load_prepare_data, plot_time_series, plot_heatmap, plot_pca_analysis
-from src.LSTM.LSTM import run_lstm_experiments
+from LSTM.LSTM_old import run_lstm_experiments
 
 
 

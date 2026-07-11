@@ -53,6 +53,7 @@ def create_sequences(
     n_scattering_features=DEFAULT_N_SCATTERING_FEATURES,
     split_name=None
 ):
+    # Converts each station segment into input windows and future target sequences.
     X_parts, y_parts = [], []
     target_index = model_features.index(TARGET)
     segment_summary = []
@@ -200,6 +201,7 @@ def create_sequences(
     return X, y
 
 def create_loader(X, y, batch_size=32, shuffle=False, split_name=None):
+    # Wraps numpy windows and targets into a PyTorch DataLoader.
     X = torch.from_numpy(X).float()
     y = torch.from_numpy(y).float()
 
@@ -224,6 +226,7 @@ def prepare_cnn_lstm_data(
     scattering_q=DEFAULT_SCATTERING_Q,
     n_scattering_features=DEFAULT_N_SCATTERING_FEATURES
 ):
+    # Prepares scaled train/validation/test loaders and feature metadata for CNN-LSTM.
     df = preprocess_data(
         df,
         base_features=BASE_FEATURES,

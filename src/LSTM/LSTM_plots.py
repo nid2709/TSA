@@ -24,6 +24,7 @@ from src.LSTM.LSTM_scattering import get_scattering_feature_names
 
 
 def plot_loss_curves(train_losses, val_losses, results_dir=None):
+    # Saves the training and validation loss curve for the LSTM run.
     plt.figure(figsize=(8, 4))
     plt.plot(train_losses, label="Train Loss")
     plt.plot(val_losses, label="Validation Loss")
@@ -53,6 +54,7 @@ def plot_scattering_wavelet_features(
     scattering_q,
     results_dir
 ):
+    # Visualizes one input window and the static scattering features added to it.
     if n_scattering_features <= 0 or len(X_train) == 0:
         return None
 
@@ -139,6 +141,7 @@ def plot_scattering_wavelet_features(
     return save_path
 
 def plot_attention_weights(model, test_loader, results_dir):
+    # Saves attention heatmaps when the LSTM attention option is enabled.
     if not getattr(model, "use_attention", False):
         return None
 
@@ -209,6 +212,7 @@ def plot_predictions(
     max_plot_points=10000,
     results_dir=None
 ):
+    # Plots actual and predicted values for one selected forecast step.
     step_index = forecast_step - 1
 
     if forecast_step < 1 or forecast_step > actuals.shape[1]:
@@ -256,6 +260,7 @@ def plot_actual_vs_predicted_scatter(
     max_points=5000,
     results_dir=None
 ):
+    # Plots all actual and predicted values against the perfect-prediction line.
     actual_values = actuals.flatten()
     predicted_values = predictions.flatten()
 
@@ -302,6 +307,7 @@ def plot_actual_vs_predicted_scatter(
     plt.close(fig)
 
 def plot_forecast_comparison(actuals, predictions, results_dir=None):
+    # Saves the main forecast comparison plots for first and final horizon steps.
     output_seq_length = actuals.shape[1]
     
     # Dynamic Plot 1: Horizon Step 1

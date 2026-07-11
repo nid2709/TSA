@@ -17,6 +17,7 @@ from src.CNN_LSTM.CNN_LSTM_config import get_cnn_lstm_results_dir
 
 
 def enable_dropout_during_inference(model):
+    # Keeps inference mode active while enabling Dropout layers for MC sampling.
     """
     Keep the full model in eval mode, but activate only Dropout layers.
     This is the key idea of Monte Carlo Dropout.
@@ -34,6 +35,7 @@ def mc_dropout_predict(
     n_samples=100,
     batch_size=256
 ):
+    # Repeats prediction with dropout enabled to estimate mean and uncertainty.
     """
     Run the same test data through the CNN-LSTM model many times with dropout ON.
     Returns:
@@ -82,6 +84,7 @@ def mc_dropout_predict(
 
 
 def calculate_uq_metrics(actuals, predictions):
+    # Calculates regression metrics for uncertainty prediction summaries.
     mse = mean_squared_error(actuals.flatten(), predictions.flatten())
     mae = mean_absolute_error(actuals.flatten(), predictions.flatten())
     rmse = np.sqrt(mse)
@@ -99,6 +102,7 @@ def plot_mc_dropout_uncertainty(
     target_label="CO2",
     results_dir=None
 ):
+    # Plots MC Dropout mean predictions with a 95 percent uncertainty band.
     """
     Plot actual values, mean prediction, and uncertainty band.
     """
@@ -204,6 +208,7 @@ def run_mc_dropout_uq(
     batch_size=256,
     max_plot_points=2000
 ):
+    # Runs MC Dropout uncertainty analysis using saved CNN-LSTM model outputs.
     """
     Main function to run MC Dropout UQ using results from run_cnn_lstm_model().
     """

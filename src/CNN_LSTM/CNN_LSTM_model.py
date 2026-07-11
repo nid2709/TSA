@@ -33,6 +33,7 @@ from src.CNN_LSTM.CNN_LSTM_config import (
 
 
 class TemporalAttention(nn.Module):
+    # Adds timestep attention so the model can weight important history positions.
     def __init__(self, hidden_size):
         super().__init__()
         self.query_matrix = nn.Linear(hidden_size, hidden_size)
@@ -56,6 +57,7 @@ class TemporalAttention(nn.Module):
 
 
 class CNNLSTMModel(nn.Module):
+    # Defines the CNN-LSTM forecasting network for local pattern and sequence learning.
     def __init__(
         self,
         input_size,
@@ -120,6 +122,7 @@ class CNNLSTMModel(nn.Module):
 
 
 def get_training_device(preferred_device=DEFAULT_DEVICE):
+    # Selects MPS, CUDA, or CPU depending on the requested and available device.
     if preferred_device == "mps" and torch.backends.mps.is_available():
         return torch.device("mps")
 
@@ -135,6 +138,7 @@ def get_training_device(preferred_device=DEFAULT_DEVICE):
 
 
 def print_batch_sanity_check(model, train_loader):
+    # Prints one batch shape and value range to confirm the model input/output flow.
     print("\n========== BATCH SANITY CHECK ==========")
 
     device = next(model.parameters()).device
@@ -158,6 +162,7 @@ def print_batch_sanity_check(model, train_loader):
 
 
 def evaluate_loss(model, loader, criterion):
+    # Computes average loss for a data loader without updating model weights.
     model.eval()
     total_loss = 0
     device = next(model.parameters()).device
@@ -184,6 +189,7 @@ def train_model(
     restore_best_model=DEFAULT_RESTORE_BEST_MODEL,
     min_delta=1e-6
 ):
+    # Trains the model with validation tracking and optional best-checkpoint restore.
     device = get_training_device()
     model.to(device)
     print("Training device:", device)
@@ -266,6 +272,7 @@ def train_model(
 
 
 def calculate_metrics(actuals, predictions):
+    # Calculates overall regression metrics across all forecast steps.
     mse = mean_squared_error(actuals.flatten(), predictions.flatten())
     mae = mean_absolute_error(actuals.flatten(), predictions.flatten())
     rmse = np.sqrt(mse)
@@ -275,6 +282,7 @@ def calculate_metrics(actuals, predictions):
 
 
 def calculate_horizon_metrics(actuals, predictions):
+    # Calculates separate regression metrics for each forecast horizon step.
     horizon_metrics = []
 
     for step_index in range(actuals.shape[1]):
@@ -298,6 +306,7 @@ def calculate_horizon_metrics(actuals, predictions):
 
 
 def save_horizon_metrics(horizon_metrics, results_dir):
+    # Saves per-horizon metric values into the main results folder.
     main_plots_dir = os.path.join(results_dir, "main_plots")
     os.makedirs(main_plots_dir, exist_ok=True)
     metrics_path = os.path.join(main_plots_dir, "per_horizon_metrics.csv")
@@ -306,6 +315,7 @@ def save_horizon_metrics(horizon_metrics, results_dir):
 
 
 def plot_horizon_error_analysis(horizon_metrics, results_dir):
+    # Plots how forecast error changes across output horizon steps.
     main_plots_dir = os.path.join(results_dir, "main_plots")
     os.makedirs(main_plots_dir, exist_ok=True)
 
@@ -363,6 +373,7 @@ def plot_horizon_error_analysis(horizon_metrics, results_dir):
 
 
 def evaluate_model(model, test_loader, results_dir=None):
+    # Runs test-set prediction, prints metrics, and saves horizon analysis outputs.
     model.eval()
     predictions, actuals = [], []
     device = next(model.parameters()).device

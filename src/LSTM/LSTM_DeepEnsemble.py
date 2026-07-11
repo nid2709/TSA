@@ -33,6 +33,7 @@ MAX_DEEP_ENSEMBLE_PLOT_POINTS = 1000
 
 
 def set_seed(seed):
+    # Sets random seeds so each ensemble member can be reproduced.
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -47,6 +48,7 @@ def plot_deep_ensemble_uncertainty(
     target_label="CO2",
     results_dir=None
 ):
+    # Plots ensemble mean predictions with a 95 percent uncertainty band.
     step_index = forecast_step - 1
 
     if forecast_step < 1 or forecast_step > actuals.shape[1]:
@@ -153,6 +155,7 @@ def run_deep_ensemble_uq(
     weight_decay=DEFAULT_WEIGHT_DECAY,
     restore_best_model=DEFAULT_RESTORE_BEST_MODEL
 ):
+    # Trains several LSTM models and summarizes uncertainty from their predictions.
     if seeds is None:
         seeds = [11, 22, 33]
 

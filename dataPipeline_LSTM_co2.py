@@ -27,6 +27,7 @@ SAVE_EDA_PLOTS = False
 
 
 def format_elapsed_time(seconds):
+    # Converts runtime seconds into a readable hours/minutes/seconds string.
     minutes, remaining_seconds = divmod(seconds, 60)
     hours, minutes = divmod(minutes, 60)
 
@@ -40,6 +41,7 @@ def format_elapsed_time(seconds):
 
 
 def run_pipeline():
+    # Runs the full LSTM CO2 workflow and optional analysis stages from one entry point.
     pipeline_start_time = time.perf_counter()
     print("Libraries imported..!")
 

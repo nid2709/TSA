@@ -8,7 +8,7 @@ from src.CNN_LSTM.dataLoad import (
     plot_heatmap,
     plot_pca_analysis
 )
-from src.CNN_LSTM.CNN_LSTM import run_cnn_lstm_model
+from src.CNN_LSTM.CNN_LSTM_old import run_cnn_lstm_model
 
 
 def run_pipeline():

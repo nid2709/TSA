@@ -93,6 +93,7 @@ def run_cnn_lstm_model(
     n_scattering_features=DEFAULT_N_SCATTERING_FEATURES,
     use_attention=DEFAULT_USE_ATTENTION
 ):
+    # Trains, evaluates, plots, and returns reusable outputs for the CNN-LSTM CO2 model.
     run_start_time = time.perf_counter()
 
     print("\n========== CNN-LSTM RUN CONFIGURATION ==========")

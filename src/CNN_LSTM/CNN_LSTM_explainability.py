@@ -26,6 +26,7 @@ from src.CNN_LSTM.CNN_LSTM_co2 import run_cnn_lstm_model
 # This helper is for SHAP Explainability because different SHAP versions can
 # return multi-output values as either samples-first or outputs-first arrays.
 def calculate_mean_abs_shap(shap_values, feature_names):
+    # Reduces SHAP outputs into one mean absolute importance value per feature.
 
     shap_array = np.array(shap_values)
 
@@ -46,6 +47,7 @@ def calculate_mean_abs_shap(shap_values, feature_names):
 
 #============================== START:SHAP FOR CNN-LSTM =============================
 def run_shap_experiment(results=None):
+    # Runs SHAP, PFI, and Integrated Gradients explanations for CNN-LSTM results.
 
     if results is None:
 
@@ -204,6 +206,7 @@ def run_shap_experiment(results=None):
 
 #============================== START:PFI FOR CNN-LSTM =============================
 def predict_in_batches(model, X_values, batch_size=256):
+    # Runs model prediction in smaller batches to avoid memory issues.
     predictions = []
     device = next(model.parameters()).device
 
@@ -229,6 +232,7 @@ def run_pfi_analysis(
     max_samples=2000,
     batch_size=256
 ):
+    # Measures feature importance by permuting one feature and tracking RMSE change.
 
     print("\n========== PERMUTATION FEATURE IMPORTANCE ==========")
 
@@ -410,6 +414,7 @@ def run_integrated_gradients_analysis(
     max_plot_points=1000,
     results_dir=None
 ):
+    # Computes Integrated Gradients feature and timestep importance for one horizon.
 
     print("\n========== INTEGRATED GRADIENTS ==========")
 
