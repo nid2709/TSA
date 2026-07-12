@@ -561,7 +561,7 @@ def graph_for_scatter_actual_vs_prediction(test_actuals_original, test_predictio
     plt.show()
 
 
-def model_pipeline(feature_df):
+def model_pipeline_XAI_UQ(feature_df):
     train_df, val_df, test_df = train_val_test_spliting(feature_df)
 
     target_col, feature_cols, x_scaler, y_scaler, train_df_scaled, val_df_scaled, test_df_scaled = min_max_scaler(
