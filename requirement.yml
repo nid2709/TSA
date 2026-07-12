@@ -1,0 +1,37 @@
+name: torch-env
+
+channels:
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      # Notebook environment
+      - jupyterlab
+      - notebook
+      - ipykernel
+
+      # Data processing, statistics, and visualization
+      - numpy
+      - pandas
+      - scipy
+      - scikit-learn
+      - statsmodels
+      - matplotlib
+      - seaborn
+      - PyWavelets
+      - ruptures
+
+      # Deep learning and forecasting
+      - torch
+      - torchvision
+      - torchaudio
+      - tensorflow
+      - neuralforecast
+
+      # Explainability and wavelet scattering
+      - shap
+      - captum
+      - kymatio
